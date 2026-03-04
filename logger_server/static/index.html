@@ -1689,15 +1689,14 @@ async function loadAlertConfig(){
     const d=await apiFetch('/alerts/config').then(r=>r.json());
     document.getElementById('ac-tg-chat').value=d.telegram_chat_id||'';
     document.getElementById('ac-webhook').value=d.webhook_url||'';
-    const rules=d.alert_rules||{};
-    document.getElementById('ac-err-en').checked=rules.error_rate_enabled??true;
-    document.getElementById('ac-err-thr').value=rules.error_rate_threshold??20;
-    document.getElementById('ac-lat-en').checked=rules.latency_enabled??true;
-    document.getElementById('ac-lat-thr').value=rules.latency_threshold??30;
-    document.getElementById('ac-big-en').checked=rules.large_request_enabled??true;
-    document.getElementById('ac-big-thr').value=rules.large_request_threshold??100000;
-    document.getElementById('ac-tok-en').checked=rules.daily_quota_enabled??false;
-    document.getElementById('ac-tok-thr').value=rules.daily_quota_millions??10;
+    document.getElementById('ac-err-en').checked=d.error_rate_enabled??true;
+    document.getElementById('ac-err-thr').value=d.error_rate_threshold??20;
+    document.getElementById('ac-lat-en').checked=d.latency_enabled??true;
+    document.getElementById('ac-lat-thr').value=d.latency_threshold_sec??30;
+    document.getElementById('ac-big-en').checked=d.large_request_enabled??true;
+    document.getElementById('ac-big-thr').value=d.large_request_threshold??100000;
+    document.getElementById('ac-tok-en').checked=d.daily_token_enabled??false;
+    document.getElementById('ac-tok-thr').value=d.daily_token_threshold_m??10;
     document.getElementById('ac-report-en').checked=d.daily_report_enabled??false;
     const utcH=d.daily_report_hour_utc??1;
     document.getElementById('ac-report-hour').value=(utcH+8)%24;
@@ -1708,19 +1707,17 @@ async function loadAlertConfig(){
 }
 async function saveAlertConfig(){
   const body={
-    telegram_token:document.getElementById('ac-tg-token').value.trim()||null,
+    telegram_bot_token:document.getElementById('ac-tg-token').value.trim()||null,
     telegram_chat_id:document.getElementById('ac-tg-chat').value.trim()||null,
     webhook_url:document.getElementById('ac-webhook').value.trim()||null,
-    alert_rules:{
-      error_rate_enabled:document.getElementById('ac-err-en').checked,
-      error_rate_threshold:parseFloat(document.getElementById('ac-err-thr').value)||20,
-      latency_enabled:document.getElementById('ac-lat-en').checked,
-      latency_threshold:parseFloat(document.getElementById('ac-lat-thr').value)||30,
-      large_request_enabled:document.getElementById('ac-big-en').checked,
-      large_request_threshold:parseInt(document.getElementById('ac-big-thr').value)||100000,
-      daily_quota_enabled:document.getElementById('ac-tok-en').checked,
-      daily_quota_millions:parseFloat(document.getElementById('ac-tok-thr').value)||10,
-    },
+    error_rate_enabled:document.getElementById('ac-err-en').checked,
+    error_rate_threshold:parseFloat(document.getElementById('ac-err-thr').value)||20,
+    latency_enabled:document.getElementById('ac-lat-en').checked,
+    latency_threshold_sec:parseFloat(document.getElementById('ac-lat-thr').value)||30,
+    large_request_enabled:document.getElementById('ac-big-en').checked,
+    large_request_threshold:parseInt(document.getElementById('ac-big-thr').value)||100000,
+    daily_token_enabled:document.getElementById('ac-tok-en').checked,
+    daily_token_threshold_m:parseFloat(document.getElementById('ac-tok-thr').value)||10,
     daily_report_enabled:document.getElementById('ac-report-en').checked,
     daily_report_hour_utc:(parseInt(document.getElementById('ac-report-hour').value)+16)%24,
   };

@@ -62,6 +62,39 @@ def _to_dict(obj):
     except Exception:
         return str(obj)
 
+def _get_conversation_id(kwargs) -> str:
+    """Extract conversation_id from kwargs with correct fallback chain.
+
+    Real path: kwargs["metadata"]["session_id"] (set by Cursor/client).
+    Fallback: user_api_key_hash (groups requests by API key user).
+    """
+    md = kwargs.get("metadata") or {}
+    lp_md = (kwargs.get("litellm_params") or {}).get("metadata") or {}
+    return (
+        md.get("session_id")
+        or lp_md.get("session_id")
+        or kwargs.get("session_id")
+        or md.get("user_api_key_hash")
+        or lp_md.get("user_api_key_hash")
+        or ""
+    )
+
+def _get_user_api_key(kwargs) -> str:
+    """Extract user API key alias for display."""
+    md = kwargs.get("metadata") or {}
+    lp_md = (kwargs.get("litellm_params") or {}).get("metadata") or {}
+    return (
+        md.get("user_api_key_alias")
+        or lp_md.get("user_api_key_alias")
+        or md.get("user_api_key_user_id")
+        or lp_md.get("user_api_key_user_id")
+        or "unknown"
+    )
+
+def _get_user_api_key_hash(kwargs) -> str:
+    md = kwargs.get("metadata") or {}
+    return md.get("user_api_key_hash") or ""
+
 async def _send(payload: dict):
     try:
         await _get_client().post(LOGGER_URL, json=payload)
@@ -121,11 +154,12 @@ class CustomLogger(_Base):
                     break
         except Exception:
             pass
+        conv_id = _get_conversation_id(kwargs)
         return {
             "request_id": request_id,
             "event_type": "raw_request",
             "model": model,
-            "conversation_id": kwargs.get("session_id") or kwargs.get("metadata", {}).get("user_id") or kwargs.get("metadata", {}).get("session_id") or "",
+            "conversation_id": conv_id,
             "request_body": _safe_json({
                 "model": model,
                 "messages": messages,
@@ -139,9 +173,9 @@ class CustomLogger(_Base):
                 "stream": kwargs.get("stream", False),
                 "litellm_call_id": request_id,
                 "num_messages": len(messages) if messages else 0,
-                "user_api_key": kwargs.get("metadata", {}).get("user_api_key_alias") or kwargs.get("user_api_key_alias") or kwargs.get("metadata", {}).get("user_id") or "unknown",
-                "user_api_key_hash": kwargs.get("metadata", {}).get("user_api_key_hash") or "",
-                "conversation_id": kwargs.get("session_id") or kwargs.get("metadata", {}).get("user_id") or kwargs.get("metadata", {}).get("session_id") or "",
+                "user_api_key": _get_user_api_key(kwargs),
+                "user_api_key_hash": _get_user_api_key_hash(kwargs),
+                "conversation_id": conv_id,
             },
         }
 
@@ -154,11 +188,12 @@ class CustomLogger(_Base):
 
     def _build_pre_payload(self, model, messages, kwargs):
         request_id = kwargs.get("litellm_call_id", str(uuid.uuid4()))
+        conv_id = _get_conversation_id(kwargs)
         return {
             "request_id": request_id,
             "event_type": "pre_call",
             "model": model,
-            "conversation_id": kwargs.get("session_id") or kwargs.get("metadata", {}).get("user_id") or kwargs.get("metadata", {}).get("session_id") or "",
+            "conversation_id": conv_id,
             "request_body": _safe_json({
                 "model": model,
                 "messages": messages,
@@ -170,9 +205,9 @@ class CustomLogger(_Base):
                 "api_base": str(kwargs.get("api_base", "")),
                 "stream": kwargs.get("stream", False),
                 "litellm_call_id": request_id,
-                "user_api_key": kwargs.get("metadata", {}).get("user_api_key_alias") or kwargs.get("user_api_key_alias") or kwargs.get("metadata", {}).get("user_id") or "unknown",
-                "user_api_key_hash": kwargs.get("metadata", {}).get("user_api_key_hash") or "",
-                "conversation_id": kwargs.get("session_id") or kwargs.get("metadata", {}).get("user_id") or kwargs.get("metadata", {}).get("session_id") or "",
+                "user_api_key": _get_user_api_key(kwargs),
+                "user_api_key_hash": _get_user_api_key_hash(kwargs),
+                "conversation_id": conv_id,
             },
         }
 
@@ -188,17 +223,18 @@ class CustomLogger(_Base):
         if is_stream:
             return
         request_id = kwargs.get("litellm_call_id", "")
+        conv_id = _get_conversation_id(kwargs)
         _fire({
             "request_id": request_id,
             "event_type": "post_call",
             "model": kwargs.get("model", ""),
-            "conversation_id": kwargs.get("session_id") or kwargs.get("metadata", {}).get("user_id") or kwargs.get("metadata", {}).get("session_id") or "",
+            "conversation_id": conv_id,
             "duration_ms": _calc_ms(start_time, end_time),
             "response_body": _safe_json(_to_dict(response_obj)),
             "metadata": {
                 "api_base": str(kwargs.get("api_base", "")),
                 "stream": kwargs.get("stream", False),
-                "conversation_id": kwargs.get("session_id") or kwargs.get("metadata", {}).get("user_id") or kwargs.get("metadata", {}).get("session_id") or "",
+                "conversation_id": conv_id,
             },
         })
 
@@ -233,11 +269,12 @@ class CustomLogger(_Base):
             stream_content = reply_text
             chunk_count = max(1, len(reply_text.split()))
 
+        conv_id = _get_conversation_id(kwargs)
         _fire({
             "request_id": request_id,
             "event_type": "success",
             "model": kwargs.get("model", ""),
-            "conversation_id": kwargs.get("session_id") or kwargs.get("metadata", {}).get("user_id") or kwargs.get("metadata", {}).get("session_id") or "",
+            "conversation_id": conv_id,
             "request_body": _safe_json({
                 "messages": kwargs.get("messages"),
                 "stream": kwargs.get("stream", False),
@@ -255,9 +292,9 @@ class CustomLogger(_Base):
                 "stream": is_stream,
                 "api_base": str(kwargs.get("api_base", "")),
                 "response_cost": kwargs.get("response_cost"),
-                "user_api_key": kwargs.get("metadata", {}).get("user_api_key_alias") or kwargs.get("user_api_key_alias") or kwargs.get("metadata", {}).get("user_id") or "unknown",
-                "user_api_key_hash": kwargs.get("metadata", {}).get("user_api_key_hash") or "",
-                "conversation_id": kwargs.get("session_id") or kwargs.get("metadata", {}).get("user_id") or kwargs.get("metadata", {}).get("session_id") or "",
+                "user_api_key": _get_user_api_key(kwargs),
+                "user_api_key_hash": _get_user_api_key_hash(kwargs),
+                "conversation_id": conv_id,
             },
         })
 
@@ -274,17 +311,18 @@ class CustomLogger(_Base):
             error_msg = traceback.format_exc() if isinstance(response_obj, Exception) else str(response_obj)
         except Exception:
             error_msg = "unknown error"
+        conv_id = _get_conversation_id(kwargs)
         _fire({
             "request_id": request_id,
             "event_type": "failure",
             "model": kwargs.get("model", ""),
-            "conversation_id": kwargs.get("session_id") or kwargs.get("metadata", {}).get("user_id") or kwargs.get("metadata", {}).get("session_id") or "",
+            "conversation_id": conv_id,
             "duration_ms": _calc_ms(start_time, end_time),
             "error": error_msg,
             "metadata": {
                 "api_base": str(kwargs.get("api_base", "")),
                 "stream": kwargs.get("stream", False),
-                "conversation_id": kwargs.get("session_id") or kwargs.get("metadata", {}).get("user_id") or kwargs.get("metadata", {}).get("session_id") or "",
+                "conversation_id": conv_id,
             },
         })
 
