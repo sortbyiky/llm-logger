@@ -8,6 +8,8 @@ services:
       - ./logs:/app/logs
       - ./logger_server/static:/app/static
       - ./logger_server/main.py:/app/main.py
+    environment:
+      - TZ=Asia/Shanghai
     restart: unless-stopped
     networks:
       - litellm_default

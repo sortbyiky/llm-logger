@@ -1,0 +1,17 @@
+{
+  "alert_config": {
+    "telegram_bot_token": "8782046296:AAEG9fqrjz9m1T3SHsV8KOk-gZDBVD-PDGo",
+    "telegram_chat_id": "8375509339",
+    "webhook_url": "",
+    "error_rate_enabled": true,
+    "error_rate_threshold": 20.0,
+    "latency_enabled": true,
+    "latency_threshold_sec": 30.0,
+    "large_request_enabled": true,
+    "large_request_threshold": 100000,
+    "daily_token_enabled": false,
+    "daily_token_threshold_m": 10.0,
+    "daily_report_enabled": true,
+    "daily_report_hour_utc": 1
+  }
+}
