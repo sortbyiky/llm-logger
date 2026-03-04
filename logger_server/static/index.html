@@ -1636,6 +1636,9 @@ async function loadAlertConfig(){
     document.getElementById('ac-big-thr').value=rules.large_request_threshold??100000;
     document.getElementById('ac-tok-en').checked=rules.daily_quota_enabled??false;
     document.getElementById('ac-tok-thr').value=rules.daily_quota_millions??10;
+    document.getElementById('ac-report-en').checked=d.daily_report_enabled??false;
+    const utcH=d.daily_report_hour_utc??1;
+    document.getElementById('ac-report-hour').value=(utcH+8)%24;
     const msg=document.getElementById('ac-msg');
     msg.textContent=d.has_telegram_token?'✅ Telegram Token 已配置':'⚠️ 未配置 Telegram Token';
     msg.style.color=d.has_telegram_token?'var(--accent-green)':'var(--accent-yellow)';
@@ -1655,7 +1658,9 @@ async function saveAlertConfig(){
       large_request_threshold:parseInt(document.getElementById('ac-big-thr').value)||100000,
       daily_quota_enabled:document.getElementById('ac-tok-en').checked,
       daily_quota_millions:parseFloat(document.getElementById('ac-tok-thr').value)||10,
-    }
+    },
+    daily_report_enabled:document.getElementById('ac-report-en').checked,
+    daily_report_hour_utc:(parseInt(document.getElementById('ac-report-hour').value)+16)%24,
   };
   try{
     await apiFetch('/alerts/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -1669,6 +1674,13 @@ async function testAlertSend(){
     const d=await r.json();
     alert(d.message||'测试消息已发送');
   }catch{alert('发送失败，请检查配置');}
+}
+async function testDailyReport(){
+  try{
+    const r=await apiFetch('/stats/daily-report/send',{method:'POST'});
+    const d=await r.json();
+    alert(d.message||'日报已发送');
+  }catch{alert('日报发送失败，请检查Telegram配置');}
 }
 async function toggleAlertHistory(){
   const pop=document.getElementById('alert-history-popup');

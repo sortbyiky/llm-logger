@@ -1087,6 +1087,84 @@ async def get_model_stats(hours: int = Query(24, ge=1, le=720), _=Depends(requir
         rows = await cur.fetchall()
     return {"models": [dict(r) for r in rows]}
 
+# ──────────────────────────────────────────────
+# GET /stats/conversations  - conversation aggregation
+# ──────────────────────────────────────────────
+@app.get("/stats/conversations")
+async def get_conversation_stats(
+    hours: int = Query(24, ge=1, le=720),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    _=Depends(require_auth),
+):
+    db = await get_db()
+    since = (datetime.utcnow() - timedelta(hours=hours)).isoformat() + "Z"
+
+    # Count total distinct conversations
+    async with db.execute(
+        """SELECT COUNT(DISTINCT conversation_id) as cnt
+           FROM logs WHERE timestamp >= ? AND conversation_id IS NOT NULL AND conversation_id != '' AND hidden = 0""",
+        (since,),
+    ) as cur:
+        total = (await cur.fetchone())["cnt"]
+
+    offset = (page - 1) * page_size
+    async with db.execute(
+        """SELECT conversation_id,
+                  COUNT(DISTINCT request_id) as request_count,
+                  SUM(CASE WHEN event_type='success' THEN COALESCE(input_tokens,0) ELSE 0 END) as total_input_tokens,
+                  SUM(CASE WHEN event_type='success' THEN COALESCE(output_tokens,0) ELSE 0 END) as total_output_tokens,
+                  SUM(CASE WHEN event_type='success' AND cost_usd IS NOT NULL THEN cost_usd ELSE 0 END) as total_cost,
+                  MIN(timestamp) as first_time,
+                  MAX(timestamp) as last_time,
+                  GROUP_CONCAT(DISTINCT model) as models
+           FROM logs
+           WHERE timestamp >= ? AND conversation_id IS NOT NULL AND conversation_id != '' AND hidden = 0
+           GROUP BY conversation_id
+           ORDER BY last_time DESC
+           LIMIT ? OFFSET ?""",
+        (since, page_size, offset),
+    ) as cur:
+        rows = await cur.fetchall()
+
+    conversations = []
+    for r in rows:
+        conversations.append({
+            "conversation_id": r["conversation_id"],
+            "request_count": r["request_count"],
+            "total_input_tokens": r["total_input_tokens"] or 0,
+            "total_output_tokens": r["total_output_tokens"] or 0,
+            "total_tokens": (r["total_input_tokens"] or 0) + (r["total_output_tokens"] or 0),
+            "total_cost": round(r["total_cost"] or 0, 6),
+            "first_time": r["first_time"],
+            "last_time": r["last_time"],
+            "models": r["models"] or "",
+        })
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "conversations": conversations,
+    }
+
+# ──────────────────────────────────────────────
+# GET /conversations/{conversation_id}  - all requests in a conversation
+# ──────────────────────────────────────────────
+@app.get("/conversations/{conversation_id}")
+async def get_conversation_detail(conversation_id: str, _=Depends(require_auth)):
+    db = await get_db()
+    async with db.execute(
+        """SELECT * FROM logs
+           WHERE conversation_id = ? AND hidden = 0
+           ORDER BY timestamp ASC""",
+        (conversation_id,),
+    ) as cur:
+        rows = await cur.fetchall()
+    if not rows:
+        raise HTTPException(404, f"conversation_id {conversation_id!r} not found")
+    return {"conversation_id": conversation_id, "events": [row_to_dict(r) for r in rows]}
+
 @app.get("/stats/timeline")
 async def get_timeline(minutes: int = Query(60, ge=5, le=1440), bucket: int = Query(5, ge=1, le=60), _=Depends(require_auth)):
     db = await get_db()
