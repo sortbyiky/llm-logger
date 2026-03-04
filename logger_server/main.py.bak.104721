@@ -58,10 +58,8 @@ def calc_cost(model: Optional[str], input_tokens: Optional[int], output_tokens: 
 # ──────────────────────────────────────────────
 # Chunk 缓冲区（内存）
 # ──────────────────────────────────────────────
-# request_id -> {"chunks": [...], "ts": timestamp}
+# request_id -> list of chunk_data strings
 _chunk_buffer: dict = {}
-_chunk_buffer_lock = asyncio.Lock()
-_CHUNK_BUFFER_TTL = 300  # 5分钟孤儿buffer自动清理
 
 # ──────────────────────────────────────────────
 # Config (password hash storage)
@@ -267,15 +265,6 @@ async def auto_cleanup_task():
     while True:
         try:
             await cleanup_old_logs()
-            # Bug1修复：清理超过5分钟的孤儿 chunk_buffer（failure/超时请求）
-            now = asyncio.get_event_loop().time()
-            async with _chunk_buffer_lock:
-                dead = [rid for rid, v in _chunk_buffer.items()
-                        if now - v.get("ts", now) > _CHUNK_BUFFER_TTL]
-                for rid in dead:
-                    del _chunk_buffer[rid]
-                if dead:
-                    print(f"[llm-logger] cleaned {len(dead)} orphan chunk buffers")
         except Exception as e:
             print(f"[llm-logger] cleanup error: {e}")
         await asyncio.sleep(6 * 3600)
@@ -375,56 +364,56 @@ async def run_alert_checks():
     since_5m = (datetime.utcnow() - timedelta(minutes=5)).isoformat() + "Z"
     today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0).isoformat() + "Z"
 
-    # 性能优化Bug6：合并为单个CTE查询，避免5次独立全表扫描
-    async with db.execute("""
-        WITH recent AS (
-            SELECT event_type, duration_ms, input_tokens, output_tokens
-            FROM logs WHERE timestamp >= ? AND hidden = 0
-        ),
-        today AS (
-            SELECT COALESCE(input_tokens,0)+COALESCE(output_tokens,0) as tokens
-            FROM logs WHERE timestamp >= ? AND event_type='success' AND hidden=0
-        )
-        SELECT
-            COUNT(CASE WHEN event_type='success' THEN 1 END) as s_cnt,
-            COUNT(CASE WHEN event_type='failure' THEN 1 END) as f_cnt,
-            AVG(CASE WHEN event_type='success' AND duration_ms IS NOT NULL THEN duration_ms END) as avg_ms,
-            (SELECT SUM(tokens) FROM today) as today_tokens
-        FROM recent
-    """, (since_5m, today_start)) as cur:
-        row = await cur.fetchone()
-        s_cnt       = row["s_cnt"] or 0
-        f_cnt       = row["f_cnt"] or 0
-        avg_ms      = row["avg_ms"] or 0
-        today_tokens = row["today_tokens"] or 0
-
-    total = s_cnt + f_cnt
-
     # 1. 错误率告警
-    if ac.get("error_rate_enabled", True) and total >= 3:
+    if ac.get("error_rate_enabled", True):
         threshold = float(ac.get("error_rate_threshold", 20))
-        err_rate = f_cnt / total * 100
-        if err_rate > threshold and not is_alert_throttled("error_rate"):
-            await dispatch_alert(
-                "error_rate", "错误率过高",
-                f"当前：{err_rate:.1f}%（阈值{threshold}%），过去5分钟共{total}次请求"
-            )
+        async with db.execute(
+            "SELECT COUNT(*) as cnt FROM logs WHERE timestamp >= ? AND event_type='success'", (since_5m,)
+        ) as cur:
+            s_cnt = (await cur.fetchone())["cnt"]
+        async with db.execute(
+            "SELECT COUNT(*) as cnt FROM logs WHERE timestamp >= ? AND event_type='failure'", (since_5m,)
+        ) as cur:
+            f_cnt = (await cur.fetchone())["cnt"]
+        total = s_cnt + f_cnt
+        if total >= 3:
+            err_rate = f_cnt / total * 100
+            if err_rate > threshold and not is_alert_throttled("error_rate"):
+                await dispatch_alert(
+                    "error_rate",
+                    f"错误率过高",
+                    f"当前：{err_rate:.1f}%（阈值{threshold}%），过去5分钟共{total}次请求"
+                )
 
     # 2. 延迟告警
     if ac.get("latency_enabled", True):
         threshold_ms = float(ac.get("latency_threshold_sec", 30)) * 1000
+        async with db.execute(
+            "SELECT AVG(duration_ms) as avg_ms FROM logs WHERE timestamp >= ? AND event_type='success' AND duration_ms IS NOT NULL",
+            (since_5m,)
+        ) as cur:
+            row = await cur.fetchone()
+            avg_ms = row["avg_ms"] or 0
         if avg_ms > threshold_ms and not is_alert_throttled("latency"):
             await dispatch_alert(
-                "latency", "平均延迟过高",
+                "latency",
+                f"平均延迟过高",
                 f"当前：{avg_ms/1000:.1f}s（阈值{threshold_ms/1000:.0f}s），过去5分钟"
             )
 
     # 3. 日Token配额预警
     if ac.get("daily_token_enabled", False):
         threshold_tokens = float(ac.get("daily_token_threshold_m", 10)) * 1_000_000
+        async with db.execute(
+            "SELECT SUM(COALESCE(input_tokens,0)+COALESCE(output_tokens,0)) as tot FROM logs WHERE timestamp >= ? AND event_type='success'",
+            (today_start,)
+        ) as cur:
+            row = await cur.fetchone()
+            today_tokens = row["tot"] or 0
         if today_tokens > threshold_tokens and not is_alert_throttled("daily_token"):
             await dispatch_alert(
-                "daily_token", "日Token配额预警",
+                "daily_token",
+                f"日Token配额预警",
                 f"今日已用：{today_tokens/1_000_000:.2f}M（阈值{threshold_tokens/1_000_000:.0f}M）"
             )
 
@@ -537,12 +526,10 @@ async def receive_log(entry: LogEntry):
     if entry.event_type == "chunk":
         rid = entry.request_id or ""
         if rid:
-            # Bug5修复：加锁保护并发写
-            async with _chunk_buffer_lock:
-                if rid not in _chunk_buffer:
-                    _chunk_buffer[rid] = {"chunks": [], "ts": asyncio.get_event_loop().time()}
-                if entry.chunk_data:
-                    _chunk_buffer[rid]["chunks"].append(entry.chunk_data)
+            if rid not in _chunk_buffer:
+                _chunk_buffer[rid] = []
+            if entry.chunk_data:
+                _chunk_buffer[rid].append(entry.chunk_data)
         # 存库但标记 hidden
         await db.execute(
             """INSERT OR REPLACE INTO logs
@@ -571,24 +558,15 @@ async def receive_log(entry: LogEntry):
     stream_content = None
     if entry.event_type == "success":
         rid = entry.request_id or ""
-        if rid:
-            # Bug1+Bug5修复：加锁，success时清理buffer
-            async with _chunk_buffer_lock:
-                if rid in _chunk_buffer:
-                    chunks = _chunk_buffer.pop(rid)["chunks"]
-                    chunk_count = len(chunks)
-                    stream_content = "".join(chunks)
-        if chunk_count == 0 and entry.chunk_count and entry.chunk_count > 0:
-            # callback 直接传来的 chunk_count（聚合模式）
+        if rid and rid in _chunk_buffer:
+            # 有 chunk 事件积累的情况（逐 chunk 模式）
+            chunks = _chunk_buffer.pop(rid)
+            chunk_count = len(chunks)
+            stream_content = "".join(chunks)
+        elif entry.chunk_count and entry.chunk_count > 0:
+            # callback 直接传来的 chunk_count（聚合模式，如 litellm success 事件）
             chunk_count = entry.chunk_count
             stream_content = entry.stream_content
-
-    # Bug1修复：failure 事件也清理 chunk_buffer，避免内存泄漏
-    if entry.event_type == "failure":
-        rid = entry.request_id or ""
-        if rid:
-            async with _chunk_buffer_lock:
-                _chunk_buffer.pop(rid, None)
         # 大请求告警
         ac = get_alert_config()
         if ac.get("large_request_enabled", True):
@@ -605,15 +583,8 @@ async def receive_log(entry: LogEntry):
     if entry.event_type == "success":
         cost_usd = calc_cost(entry.model, entry.input_tokens, entry.output_tokens)
 
-    # 性能优化5：response_body 只存摘要（前2KB），避免大JSON拖慢写入
-    response_body_to_store = entry.response_body
-    if response_body_to_store:
-        rb_str = json.dumps(response_body_to_store, ensure_ascii=False)
-        if len(rb_str) > 2048:
-            response_body_to_store = {"_truncated": True, "_preview": rb_str[:2048]}
-
     await db.execute(
-        """INSERT OR IGNORE INTO logs
+        """INSERT OR REPLACE INTO logs
            (id, request_id, timestamp, event_type, model, upstream_model,
             duration_ms, input_tokens, output_tokens,
             request_body, response_body, chunk_data, error, metadata,
@@ -624,7 +595,7 @@ async def receive_log(entry: LogEntry):
             entry.model, entry.upstream_model, entry.duration_ms,
             entry.input_tokens, entry.output_tokens,
             json.dumps(entry.request_body, ensure_ascii=False) if entry.request_body else None,
-            json.dumps(response_body_to_store, ensure_ascii=False) if response_body_to_store else None,
+            json.dumps(entry.response_body, ensure_ascii=False) if entry.response_body else None,
             entry.chunk_data, entry.error,
             json.dumps(entry.metadata, ensure_ascii=False) if entry.metadata else None,
             chunk_count, stream_content, cost_usd,
@@ -813,33 +784,41 @@ async def delete_note(note_id: str, _=Depends(require_auth)):
 async def get_stats(hours: int = Query(24, ge=1, le=720), _=Depends(require_auth)):
     db = await get_db()
     since = (datetime.utcnow() - timedelta(hours=hours)).isoformat() + "Z"
-    rpm_since = (datetime.utcnow() - timedelta(hours=1)).isoformat() + "Z"
 
-    # 性能优化1：合并为单个CTE查询，减少6次独立查询为1次
-    async with db.execute("""
-        WITH base AS (
-            SELECT event_type, duration_ms, input_tokens, output_tokens, cost_usd
-            FROM logs WHERE timestamp >= ? AND hidden = 0
-        )
-        SELECT
-            COUNT(CASE WHEN event_type='success' THEN 1 END) as success_count,
-            COUNT(CASE WHEN event_type='failure' THEN 1 END) as failure_count,
-            AVG(CASE WHEN event_type='success' AND duration_ms IS NOT NULL THEN duration_ms END) as avg_ms,
-            SUM(CASE WHEN event_type='success' THEN COALESCE(input_tokens,0) ELSE 0 END) as total_input,
-            SUM(CASE WHEN event_type='success' THEN COALESCE(output_tokens,0) ELSE 0 END) as total_output,
-            SUM(CASE WHEN event_type='success' AND cost_usd IS NOT NULL THEN cost_usd END) as total_cost,
-            AVG(CASE WHEN event_type='success' AND cost_usd IS NOT NULL THEN cost_usd END) as avg_cost
-        FROM base
-    """, (since,)) as cur:
+    async with db.execute(
+        "SELECT COUNT(*) as cnt FROM logs WHERE timestamp >= ? AND event_type='success'", (since,)
+    ) as cur:
+        success_count = (await cur.fetchone())["cnt"]
+
+    async with db.execute(
+        "SELECT COUNT(*) as cnt FROM logs WHERE timestamp >= ? AND event_type='failure'", (since,)
+    ) as cur:
+        failure_count = (await cur.fetchone())["cnt"]
+
+    async with db.execute(
+        "SELECT AVG(duration_ms) as avg_ms FROM logs WHERE timestamp >= ? AND event_type='success' AND duration_ms IS NOT NULL",
+        (since,),
+    ) as cur:
         row = await cur.fetchone()
-        success_count = row["success_count"] or 0
-        failure_count = row["failure_count"] or 0
-        avg_duration  = round(row["avg_ms"], 2) if row["avg_ms"] else 0
-        total_input   = row["total_input"] or 0
-        total_output  = row["total_output"] or 0
-        total_cost    = round(row["total_cost"], 6) if row["total_cost"] else 0.0
-        avg_cost      = round(row["avg_cost"], 6) if row["avg_cost"] else 0.0
+        avg_duration = round(row["avg_ms"], 2) if row["avg_ms"] else 0
 
+    async with db.execute(
+        "SELECT SUM(input_tokens) as inp, SUM(output_tokens) as outp FROM logs WHERE timestamp >= ? AND event_type='success'",
+        (since,),
+    ) as cur:
+        row = await cur.fetchone()
+        total_input = row["inp"] or 0
+        total_output = row["outp"] or 0
+
+    async with db.execute(
+        "SELECT SUM(cost_usd) as total_cost, AVG(cost_usd) as avg_cost FROM logs WHERE timestamp >= ? AND event_type='success' AND cost_usd IS NOT NULL",
+        (since,),
+    ) as cur:
+        row = await cur.fetchone()
+        total_cost = round(row["total_cost"], 6) if row["total_cost"] else 0.0
+        avg_cost = round(row["avg_cost"], 6) if row["avg_cost"] else 0.0
+
+    rpm_since = (datetime.utcnow() - timedelta(hours=1)).isoformat() + "Z"
     async with db.execute(
         "SELECT COUNT(*) as cnt FROM logs WHERE timestamp >= ? AND event_type='pre_call'", (rpm_since,)
     ) as cur:
@@ -848,7 +827,7 @@ async def get_stats(hours: int = Query(24, ge=1, le=720), _=Depends(require_auth
     rpm_history = []
     for i in range(9, -1, -1):
         bucket_start = (datetime.utcnow() - timedelta(minutes=i+1)).isoformat() + "Z"
-        bucket_end   = (datetime.utcnow() - timedelta(minutes=i)).isoformat() + "Z"
+        bucket_end = (datetime.utcnow() - timedelta(minutes=i)).isoformat() + "Z"
         async with db.execute(
             "SELECT COUNT(*) as cnt FROM logs WHERE timestamp >= ? AND timestamp < ? AND event_type='pre_call'",
             (bucket_start, bucket_end),
@@ -1015,107 +994,7 @@ async def health():
     db = await get_db()
     async with db.execute("SELECT COUNT(*) as cnt FROM logs") as cur:
         total = (await cur.fetchone())["cnt"]
-    return {"status": "ok", "time": datetime.utcnow().isoformat() + "Z", "total_logs": total, "version": "4.1.0"}
-
-# ──────────────────────────────────────────────
-# GET /metrics  (Prometheus format, no auth)
-# ──────────────────────────────────────────────
-@app.get("/metrics", response_class=__import__("fastapi").responses.PlainTextResponse)
-async def prometheus_metrics():
-    """Prometheus metrics endpoint - scrape this with your Prometheus instance."""
-    from fastapi.responses import PlainTextResponse
-    db = await get_db()
-    since_24h = (datetime.utcnow() - timedelta(hours=24)).isoformat() + "Z"
-
-    async with db.execute("""
-        WITH base AS (
-            SELECT event_type, duration_ms, input_tokens, output_tokens, cost_usd, model
-            FROM logs WHERE timestamp >= ? AND hidden = 0
-        )
-        SELECT
-            COUNT(CASE WHEN event_type='success' THEN 1 END) as success_count,
-            COUNT(CASE WHEN event_type='failure' THEN 1 END) as failure_count,
-            AVG(CASE WHEN event_type='success' AND duration_ms IS NOT NULL THEN duration_ms END) as avg_ms,
-            SUM(CASE WHEN event_type='success' THEN COALESCE(input_tokens,0) ELSE 0 END) as total_input,
-            SUM(CASE WHEN event_type='success' THEN COALESCE(output_tokens,0) ELSE 0 END) as total_output,
-            SUM(CASE WHEN event_type='success' AND cost_usd IS NOT NULL THEN cost_usd END) as total_cost
-        FROM base
-    """, (since_24h,)) as cur:
-        row = await cur.fetchone()
-        success_count = row["success_count"] or 0
-        failure_count = row["failure_count"] or 0
-        avg_ms        = row["avg_ms"] or 0
-        total_input   = row["total_input"] or 0
-        total_output  = row["total_output"] or 0
-        total_cost    = row["total_cost"] or 0.0
-
-    async with db.execute("""
-        SELECT model,
-               COUNT(*) as requests,
-               SUM(CASE WHEN event_type='success' THEN 1 ELSE 0 END) as successes,
-               SUM(COALESCE(input_tokens,0)) as input_tokens,
-               SUM(COALESCE(output_tokens,0)) as output_tokens,
-               SUM(COALESCE(cost_usd,0)) as cost_usd
-        FROM logs WHERE timestamp >= ? AND model IS NOT NULL AND model != '' AND hidden=0
-        GROUP BY model
-    """, (since_24h,)) as cur:
-        model_rows = await cur.fetchall()
-
-    ws_connections = len(manager.active_connections)
-
-    lines = [
-        "# HELP llm_requests_total Total LLM requests in last 24h",
-        "# TYPE llm_requests_total gauge",
-        f'llm_requests_total{{status="success"}} {success_count}',
-        f'llm_requests_total{{status="failure"}} {failure_count}',
-        "",
-        "# HELP llm_tokens_total Total tokens used in last 24h",
-        "# TYPE llm_tokens_total gauge",
-        f'llm_tokens_total{{type="input"}} {total_input}',
-        f'llm_tokens_total{{type="output"}} {total_output}',
-        f'llm_tokens_total{{type="total"}} {total_input + total_output}',
-        "",
-        "# HELP llm_cost_usd_total Total cost in USD in last 24h",
-        "# TYPE llm_cost_usd_total gauge",
-        f"llm_cost_usd_total {round(total_cost, 6)}",
-        "",
-        "# HELP llm_request_duration_ms_avg Average request duration in ms (last 24h)",
-        "# TYPE llm_request_duration_ms_avg gauge",
-        f"llm_request_duration_ms_avg {round(avg_ms, 2)}",
-        "",
-        "# HELP llm_active_websocket_connections Current active WebSocket connections",
-        "# TYPE llm_active_websocket_connections gauge",
-        f"llm_active_websocket_connections {ws_connections}",
-        "",
-        "# HELP llm_requests_by_model_total Requests per model in last 24h",
-        "# TYPE llm_requests_by_model_total gauge",
-    ]
-    for r in model_rows:
-        m = (r["model"] or "unknown").replace('"', '')
-        lines.append(f'llm_requests_by_model_total{{model="{m}"}} {r["requests"]}')
-
-    lines += [
-        "",
-        "# HELP llm_cost_by_model_usd Cost per model in USD (last 24h)",
-        "# TYPE llm_cost_by_model_usd gauge",
-    ]
-    for r in model_rows:
-        m = (r["model"] or "unknown").replace('"', '')
-        lines.append(f'llm_cost_by_model_usd{{model="{m}"}} {round(r["cost_usd"] or 0, 6)}')
-
-    lines += [
-        "",
-        "# HELP llm_tokens_by_model_total Tokens per model (last 24h)",
-        "# TYPE llm_tokens_by_model_total gauge",
-    ]
-    for r in model_rows:
-        m = (r["model"] or "unknown").replace('"', '')
-        inp = r["input_tokens"] or 0
-        out = r["output_tokens"] or 0
-        lines.append(f'llm_tokens_by_model_total{{model="{m}",type="input"}} {inp}')
-        lines.append(f'llm_tokens_by_model_total{{model="{m}",type="output"}} {out}')
-
-    return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4; charset=utf-8")
+    return {"status": "ok", "time": datetime.utcnow().isoformat() + "Z", "total_logs": total, "version": "4.0.0"}
 
 # ──────────────────────────────────────────────
 # DELETE /logs
