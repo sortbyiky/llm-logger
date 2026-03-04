@@ -227,6 +227,12 @@ class CustomLogger(_Base):
             "request_id": request_id,
             "event_type": "success",
             "model": kwargs.get("model", ""),
+            "request_body": _safe_json({
+                "messages": kwargs.get("messages"),
+                "stream": kwargs.get("stream", False),
+                "max_tokens": kwargs.get("max_tokens"),
+                "temperature": kwargs.get("temperature"),
+            }),
             "duration_ms": _calc_ms(start_time, end_time),
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
