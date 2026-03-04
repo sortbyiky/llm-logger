@@ -128,6 +128,18 @@ class CustomLogger(_Base):
             except Exception:
                 pass
 
+    # Pre-call hook: 过滤掉非 Gemini 模型的 extra_body.google 参数，避免 INVALID_ARGUMENT
+    async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):
+        model = data.get("model", "")
+        is_gemini = "gemini" in model.lower()
+        if not is_gemini:
+            extra_body = data.get("extra_body", {})
+            if isinstance(extra_body, dict) and "google" in extra_body:
+                data["extra_body"] = {k: v for k, v in extra_body.items() if k != "google"}
+                if not data["extra_body"]:
+                    data.pop("extra_body", None)
+        return data
+
     # 0. Raw request from Cursor - captured before LiteLLM processes it
     def log_pre_api_call(self, model, messages, kwargs):
         self._emit_raw_request(model, messages, kwargs)
