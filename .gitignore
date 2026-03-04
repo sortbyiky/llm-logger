@@ -1,9 +1,28 @@
-logs/*.jsonl
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+
+# Logs & DB (runtime data, not committed)
 logs/*.db
 logs/*.db-shm
 logs/*.db-wal
+logs/*.jsonl
 logs/config.json
-TASK.md
-__pycache__/
-*.pyc
+
+# Env
 .env
+.env.*
+
+# Docker
+.docker/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

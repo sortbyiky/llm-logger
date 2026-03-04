@@ -368,6 +368,45 @@ pre.json-code { font-family:'Menlo','Consolas',monospace; font-size:11px; white-
 .changepw-btn.secondary { background:var(--bg-tertiary); color:var(--text-secondary); }
 .changepw-err { color:var(--accent-red); font-size:11px; margin-bottom:8px; min-height:14px; }
 
+/* ALERT CONFIG MODAL */
+#alert-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.75); z-index:700; align-items:center; justify-content:center; }
+#alert-modal.open { display:flex; }
+.alert-box { background:var(--bg-secondary); border:1px solid var(--border); border-radius:10px; width:min(520px,96vw); max-height:90vh; overflow-y:auto; padding:28px; box-shadow:0 24px 80px rgba(0,0,0,.6); }
+.alert-title { font-size:15px; font-weight:700; margin-bottom:20px; display:flex; justify-content:space-between; align-items:center; }
+.alert-section { margin-bottom:16px; border-bottom:1px solid var(--border-muted); padding-bottom:14px; }
+.alert-section:last-of-type { border-bottom:none; }
+.alert-section h4 { font-size:11px; text-transform:uppercase; color:var(--text-muted); letter-spacing:.5px; margin-bottom:10px; }
+.alert-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+.alert-label { font-size:12px; color:var(--text-secondary); flex:1; }
+.alert-input { background:var(--bg-tertiary); border:1px solid var(--border); color:var(--text-primary); border-radius:var(--radius); padding:5px 9px; font-size:12px; outline:none; width:140px; }
+.alert-input:focus { border-color:var(--accent-blue); }
+.alert-input.wide { width:100%; margin-top:4px; }
+.alert-toggle { display:flex; align-items:center; gap:6px; margin-bottom:8px; }
+.alert-toggle input { accent-color:var(--accent-blue); cursor:pointer; }
+.alert-toggle label { font-size:12px; color:var(--text-secondary); cursor:pointer; flex:1; }
+.alert-btns { display:flex; gap:8px; margin-top:16px; }
+.alert-btn { flex:1; padding:8px; border-radius:var(--radius); border:1px solid var(--border); cursor:pointer; font-size:13px; }
+.alert-btn.primary { background:var(--accent-blue); border-color:var(--accent-blue); color:#fff; }
+.alert-btn.secondary { background:var(--bg-tertiary); color:var(--text-secondary); }
+.alert-btn.test { background:var(--bg-tertiary); border-color:var(--accent-green); color:var(--accent-green); }
+.alert-msg { font-size:11px; min-height:14px; margin-top:6px; }
+.alert-note { font-size:11px; color:var(--text-muted); margin-top:4px; }
+
+/* ALERT HISTORY POPUP */
+#alert-history-popup { display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:600; align-items:center; justify-content:center; }
+#alert-history-popup.open { display:flex; }
+.alert-hist-box { background:var(--bg-secondary); border:1px solid var(--border); border-radius:10px; width:min(500px,94vw); max-height:80vh; overflow-y:auto; padding:20px; box-shadow:0 24px 80px rgba(0,0,0,.6); }
+.alert-hist-item { border:1px solid var(--border); border-radius:var(--radius); padding:10px 14px; margin-bottom:8px; background:var(--bg-tertiary); }
+.alert-hist-type { font-size:11px; font-weight:700; color:var(--accent-red); margin-bottom:3px; }
+.alert-hist-msg { font-size:12px; color:var(--text-primary); margin-bottom:2px; }
+.alert-hist-detail { font-size:11px; color:var(--text-muted); }
+.alert-hist-time { font-size:10px; color:var(--text-muted); margin-top:4px; }
+.alert-badge { background:var(--accent-red); color:#fff; border-radius:50%; width:16px; height:16px; font-size:9px; font-weight:700; display:inline-flex; align-items:center; justify-content:center; position:relative; top:-6px; left:-4px; }
+
+/* COST COLUMN */
+.col-cost { width:72px; flex-shrink:0; text-align:right; font-size:10px; color:var(--accent-yellow); white-space:nowrap; }
+.col-cost-cell { width:72px; flex-shrink:0; text-align:right; font-size:10px; color:var(--accent-yellow); white-space:nowrap; }
+
 ::-webkit-scrollbar { width:6px; height:6px; }
 ::-webkit-scrollbar-track { background:transparent; }
 ::-webkit-scrollbar-thumb { background:var(--bg-hover); border-radius:3px; }
@@ -418,10 +457,12 @@ pre.json-code { font-family:'Menlo','Consolas',monospace; font-size:11px; white-
   <button class="hdr-btn active" id="btn-autoscroll" onclick="toggleAutoScroll()">自动滚动</button>
   <button class="hdr-btn" onclick="clearView()">清空视图</button>
   <button class="hdr-btn" onclick="showExportMenu()">导出</button>
+  <span id="alert-bell-wrap" onclick="toggleAlertHistory()" title="告警历史" style="cursor:pointer;font-size:18px;padding:4px 8px;border-radius:var(--radius);background:var(--bg-tertiary);border:1px solid var(--border);display:flex;align-items:center;position:relative;">🔔<span id="alert-badge" style="display:none;background:var(--accent-red);color:#fff;border-radius:50%;min-width:16px;height:16px;font-size:9px;font-weight:700;position:absolute;top:0;right:0;align-items:center;justify-content:center;padding:0 3px;"></span></span>
   <div class="hdr-btn" id="account-wrap" style="padding:5px 8px;cursor:pointer;" onclick="toggleAccountMenu()">
     👤
     <div id="account-menu">
       <div class="acct-item" onclick="openChangePw()">修改密码</div>
+      <div class="acct-item" onclick="openAlertConfig()">🔔 告警配置</div>
       <div class="acct-item" onclick="doLogout()" style="color:var(--accent-red)">退出登录</div>
     </div>
   </div>
@@ -434,6 +475,7 @@ pre.json-code { font-family:'Menlo','Consolas',monospace; font-size:11px; white-
   <div class="stat-card" onclick="openStatDetail('fail')"><div class="label">失败数</div><div class="value red" id="st-fail">—</div></div>
   <div class="stat-card" onclick="openStatDetail('lat')"><div class="label">平均延迟</div><div class="value yellow" id="st-lat">—</div></div>
   <div class="stat-card" onclick="openStatDetail('tok')"><div class="label">总Token消耗</div><div class="value purple" id="st-tok">—</div></div>
+  <div class="stat-card" onclick="openStatDetail('cost')"><div class="label">💰 总成本</div><div class="value yellow" id="st-cost">—</div></div>
   <div class="stat-card"><div class="label">每分钟请求(RPM)</div><div class="value" id="st-rpm">—</div><div class="sub" id="st-compare"></div></div>
 </div>
 
@@ -488,6 +530,16 @@ pre.json-code { font-family:'Menlo','Consolas',monospace; font-size:11px; white-
       <button class="sidebar-btn" onclick="loadHistory()">刷新日志</button>
       <button class="sidebar-btn" onclick="confirmDeleteOld()" style="color:var(--accent-red)">删除旧日志…</button>
     </div>
+    <div class="sidebar-section">
+      <h4>成本过滤</h4>
+      <div class="filter-label">成本区间</div>
+      <select class="filter-select" id="f-cost-tier" onchange="applyFilter()">
+        <option value="">全部</option>
+        <option value="cheap">便宜（&lt;$0.01）</option>
+        <option value="medium">适中（$0.01~$0.1）</option>
+        <option value="expensive">昂贵（≥$0.1）</option>
+      </select>
+    </div>
   </div>
 
   <div id="main">
@@ -519,6 +571,7 @@ pre.json-code { font-family:'Menlo','Consolas',monospace; font-size:11px; white-
       <div class="col-time" id="hdr-time">时间</div>
       <div class="col-dur" id="hdr-dur">耗时</div>
       <div class="col-tok" id="hdr-tok">Token数</div>
+      <div class="col-cost" id="hdr-cost">成本</div>
       <div class="col-gear col-gear-wrap">
         <button class="gear-btn" onclick="toggleColPicker(event)" title="自定义列">⚙</button>
         <div id="col-picker">
@@ -588,6 +641,63 @@ pre.json-code { font-family:'Menlo','Consolas',monospace; font-size:11px; white-
   </div>
 </div>
 
+<!-- ALERT CONFIG MODAL -->
+<div id="alert-modal">
+  <div class="alert-box" onclick="event.stopPropagation()">
+    <div class="alert-title">🔔 告警配置<button onclick="closeAlertConfig()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:20px">×</button></div>
+    <div class="alert-section">
+      <h4>Telegram 推送</h4>
+      <div class="filter-label">Bot Token</div>
+      <input class="alert-input wide" id="ac-tg-token" placeholder="留空=保留已有token（输入新值覆盖）" type="password">
+      <div class="filter-label" style="margin-top:8px">Chat ID</div>
+      <input class="alert-input wide" id="ac-tg-chat" placeholder="例：-100123456789">
+      <div class="alert-note">💡 获取 Chat ID：给 @userinfobot 发任意消息，它会回复你的 ID</div>
+      <div class="filter-label" style="margin-top:8px">Webhook URL（可选）</div>
+      <input class="alert-input wide" id="ac-webhook" placeholder="https://your-server.com/webhook">
+    </div>
+    <div class="alert-section">
+      <h4>告警规则</h4>
+      <div class="alert-toggle">
+        <input type="checkbox" id="ac-err-en"><label for="ac-err-en">错误率告警</label>
+        <input class="alert-input" id="ac-err-thr" type="number" min="1" max="100" placeholder="20" style="width:60px">
+        <span style="font-size:11px;color:var(--text-muted)">%</span>
+      </div>
+      <div class="alert-toggle">
+        <input type="checkbox" id="ac-lat-en"><label for="ac-lat-en">延迟告警</label>
+        <input class="alert-input" id="ac-lat-thr" type="number" min="1" placeholder="30" style="width:60px">
+        <span style="font-size:11px;color:var(--text-muted)">秒</span>
+      </div>
+      <div class="alert-toggle">
+        <input type="checkbox" id="ac-big-en"><label for="ac-big-en">大请求告警</label>
+        <input class="alert-input" id="ac-big-thr" type="number" min="1000" placeholder="100000" style="width:80px">
+        <span style="font-size:11px;color:var(--text-muted)">token</span>
+      </div>
+      <div class="alert-toggle">
+        <input type="checkbox" id="ac-tok-en"><label for="ac-tok-en">日Token配额预警</label>
+        <input class="alert-input" id="ac-tok-thr" type="number" min="1" placeholder="10" style="width:60px">
+        <span style="font-size:11px;color:var(--text-muted)">百万token</span>
+      </div>
+    </div>
+    <div class="alert-msg" id="ac-msg"></div>
+    <div class="alert-btns">
+      <button class="alert-btn test" onclick="testAlertSend()">发送测试消息</button>
+      <button class="alert-btn secondary" onclick="closeAlertConfig()">取消</button>
+      <button class="alert-btn primary" onclick="saveAlertConfig()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ALERT HISTORY POPUP -->
+<div id="alert-history-popup" onclick="closeAlertHistory()">
+  <div class="alert-hist-box" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <span style="font-weight:700;font-size:14px">🔔 告警历史（最近10条）</span>
+      <button onclick="closeAlertHistory()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:20px">×</button>
+    </div>
+    <div id="alert-hist-body"><div class="empty-state">暂无告警</div></div>
+  </div>
+</div>
+
 <script>
 'use strict';
 const MAX_LIVE = 3000;
@@ -619,9 +729,10 @@ let pageMaxTokens = 0;
 let preloadCache = new Map();
 let preloadTimers = new Map();
 let selectedIds = new Set();
-let colPrefs = {evt:true,model:true,time:true,dur:true,tok:true};
+let colPrefs = {evt:true,model:true,time:true,dur:true,tok:true,cost:true};
 let lastStatsData = null;
 let tabRendered = {};
+let alertUnread = 0;
 
 // AUTH
 function authHeaders() {
@@ -848,6 +959,13 @@ function pushLive(entry) {
 }
 
 // ROW BUILD
+function fmtCost(cost) {
+  if(cost==null||cost===undefined) return '';
+  if(cost<0.0001) return '$'+cost.toFixed(6);
+  if(cost<0.01) return '$'+cost.toFixed(4);
+  if(cost<1) return '$'+cost.toFixed(2);
+  return '$'+cost.toFixed(2);
+}
 function buildRowHtml(entry) {
   const tokens=(entry.input_tokens||0)+(entry.output_tokens||0);
   const tokPct=pageMaxTokens>0?Math.round((tokens/pageMaxTokens)*100):0;
@@ -867,15 +985,28 @@ function buildRowHtml(entry) {
   const timH=colPrefs.time?'':'style="display:none"';
   const durH=colPrefs.dur?'':'style="display:none"';
   const tokH=colPrefs.tok?'':'style="display:none"';
+  const cstH=colPrefs.cost?'':'style="display:none"';
+  // stream badge with chunk count
+  const streamBadge=(()=>{
+    const rb=entry.request_body;
+    const isStream=rb&&rb.stream===true||(entry.event_type==='chunk');
+    const chunkN=entry.chunk_count>0?entry.chunk_count:0;
+    if(entry.event_type==='success'&&chunkN>0) return `<span class="stream-badge stream">⚡流式·${chunkN}片</span>`;
+    if(isStream) return '<span class="stream-badge stream">⚡流式</span>';
+    if(rb&&rb.stream===false) return '<span class="stream-badge sync">⬜同步</span>';
+    return '';
+  })();
+  const costHtml=entry.cost_usd!=null?`<span title="成本">${fmtCost(entry.cost_usd)}</span>`:'';
   return `<div class="row-cb"><input type="checkbox" ${checked} onclick="toggleSelectCb(event,'${escapeHtml(entry.id||'')}')"></div>
     <div class="chain-dot-indicator ${chainDot}"></div>
-    <div class="col-evt" ${evtH}><span class="evt-badge evt-${escapeHtml(entry.event_type)}">${escapeHtml(evtLabel(entry.event_type))}</span>${(()=>{const rb=entry.request_body;const isStream=rb&&rb.stream===true||(entry.event_type==='chunk');if(isStream)return '<span class="stream-badge stream">⚡流式</span>';if(rb&&rb.stream===false)return '<span class="stream-badge sync">⬜同步</span>';return '';})()}</div>
+    <div class="col-evt" ${evtH}><span class="evt-badge evt-${escapeHtml(entry.event_type)}">${escapeHtml(evtLabel(entry.event_type))}</span>${streamBadge}</div>
     <div class="col-model-cell" ${mdlH} title="${escapeHtml(entry.model||'')}">${escapeHtml(entry.model||'—')}</div>
     <div class="col-req-cell">${reqIdHtml}${notePin}</div>
     <div class="col-msg-cell">${msgPreview(entry)}</div>
     <div class="col-time-cell" ${timH}>${fmtTime(entry.timestamp)}</div>
     <div class="col-dur-cell ${durClass(entry.duration_ms)}" ${durH}>${fmtDur(entry.duration_ms)}</div>
-    <div class="col-tok-cell" ${tokH}>${tokens>0?`<span class="tok-num">${fmtNum(tokens)}</span><div class="tok-bar-wrap"><div class="tok-bar" style="width:${tokPct}%"></div></div>`:''}</div>`;
+    <div class="col-tok-cell" ${tokH}>${tokens>0?`<span class="tok-num">${fmtNum(tokens)}</span><div class="tok-bar-wrap"><div class="tok-bar" style="width:${tokPct}%"></div></div>`:''}</div>
+    <div class="col-cost-cell" ${cstH}>${costHtml}</div>`;
 }
 function getRowBg(entry) { return 'transparent'; }
 
@@ -966,6 +1097,8 @@ function batchDelete(){alert('批量删除暂未实现');}
 function getCheckedEvents(){return Array.from(document.querySelectorAll('#evt-checks input:checked')).map(cb=>cb.value);}
 function toggleRegex(){useRegex=!useRegex;document.getElementById('regex-toggle-btn').classList.toggle('active',useRegex);applyFilter();}
 function matchFilter(e) {
+  // 默认隐藏 chunk 事件（hidden=1）
+  if(e.hidden===true||e.hidden===1) return false;
   const evts=getCheckedEvents(); if(evts.length>0&&!evts.includes(e.event_type)) return false;
   const model=document.getElementById('f-model').value; if(model&&e.model!==model) return false;
   const status=document.getElementById('f-status').value;
@@ -976,11 +1109,16 @@ function matchFilter(e) {
   if(kw){try{const hay=JSON.stringify(e);if(useRegex){if(!new RegExp(kw,'i').test(hay))return false;}else{if(!hay.toLowerCase().includes(kw.toLowerCase()))return false;}}catch{return false;}}
   const start=document.getElementById('f-start').value; if(start&&(e.timestamp||'')<new Date(start).toISOString()) return false;
   const end=document.getElementById('f-end').value; if(end&&(e.timestamp||'')>new Date(end).toISOString()) return false;
+  // 成本过滤（仅前端实时模式）
+  const costTier=document.getElementById('f-cost-tier').value;
+  if(costTier==='cheap'&&!(e.cost_usd!=null&&e.cost_usd<0.01)) return false;
+  if(costTier==='medium'&&!(e.cost_usd!=null&&e.cost_usd>=0.01&&e.cost_usd<0.1)) return false;
+  if(costTier==='expensive'&&!(e.cost_usd!=null&&e.cost_usd>=0.1)) return false;
   return true;
 }
 function applyFilter(){updateFilterTags();if(liveMode){filteredLogs=allLogs.filter(matchFilter);currentPage=1;renderList();}else{currentPage=1;loadHistory();}}
 function debounceFilter(){clearTimeout(filterTimer);filterTimer=setTimeout(applyFilter,300);}
-function resetFilters(){document.querySelectorAll('#evt-checks input').forEach(cb=>cb.checked=false);['f-model','f-status','f-reqid','f-keyword','f-start','f-end'].forEach(id=>document.getElementById(id).value='');document.getElementById('f-annotated').checked=false;applyFilter();}
+function resetFilters(){document.querySelectorAll('#evt-checks input').forEach(cb=>cb.checked=false);['f-model','f-status','f-reqid','f-keyword','f-start','f-end','f-cost-tier'].forEach(id=>document.getElementById(id).value='');document.getElementById('f-annotated').checked=false;applyFilter();}
 function updateFilterTags(){
   const tags=[];
   const evts=getCheckedEvents();if(evts.length)tags.push({l:'类型:'+evts.map(evtLabel).join(','),c:()=>{document.querySelectorAll('#evt-checks input').forEach(cb=>cb.checked=false);applyFilter();}});
@@ -989,6 +1127,7 @@ function updateFilterTags(){
   const reqid=document.getElementById('f-reqid').value.trim();if(reqid)tags.push({l:'请求ID:'+reqid.slice(0,12),c:()=>{document.getElementById('f-reqid').value='';applyFilter();}});
   const kw=document.getElementById('f-keyword').value.trim();if(kw)tags.push({l:(useRegex?'正则:':'关键词:')+kw.slice(0,20),c:()=>{document.getElementById('f-keyword').value='';applyFilter();}});
   if(document.getElementById('f-annotated').checked)tags.push({l:'只看已标注',c:()=>{document.getElementById('f-annotated').checked=false;applyFilter();}});
+  const costTier=document.getElementById('f-cost-tier').value;const costTierLabel={cheap:'便宜',medium:'适中',expensive:'昂贵'};if(costTier)tags.push({l:'成本:'+costTierLabel[costTier],c:()=>{document.getElementById('f-cost-tier').value='';applyFilter();}});
   window._tagClears=tags.map(t=>t.c);
   document.getElementById('filter-tags').innerHTML=tags.map((t,i)=>`<div class="filter-tag">${escapeHtml(t.l)} <span class="rm" onclick="window._tagClears[${i}]()">×</span></div>`).join('');
 }
@@ -1058,6 +1197,7 @@ function updateModalSub(entry){
   if(entry.timestamp)parts.push(`<span>时间: ${fmtDateTime(entry.timestamp)}</span>`);
   if(entry.duration_ms!=null)parts.push(`<span>耗时: <strong class="${durClass(entry.duration_ms)}">${fmtDur(entry.duration_ms)}</strong></span>`);
   if(entry.input_tokens||entry.output_tokens)parts.push(`<span>Token: ${fmtNum(entry.input_tokens||0)} 输入 / ${fmtNum(entry.output_tokens||0)} 输出</span>`);
+  if(entry.cost_usd!=null)parts.push(`<span>💰 成本: <strong style="color:var(--accent-yellow)">${fmtCost(entry.cost_usd)}</strong></span>`);
   document.getElementById('modal-sub').innerHTML=parts.join('');
 }
 function switchModalTab(tab){
@@ -1203,15 +1343,25 @@ function renderModalResponse(events,body){
   if(!ev){body.innerHTML='<div class="empty-state">无响应数据</div>';return;}
   let contentText='';
   if(ev.response_body&&ev.response_body.choices&&ev.response_body.choices[0]) contentText=(ev.response_body.choices[0].message&&ev.response_body.choices[0].message.content)||'';
+  // 优先使用 stream_content（流式聚合内容）
+  if(!contentText&&ev.stream_content) contentText=ev.stream_content;
   if(!contentText&&ev.chunk_data) contentText=ev.chunk_data;
   const uid='rv_'+(Math.random().toString(36).slice(2));
+  // 流式信息
+  const streamInfo=ev.chunk_count>0?`<div style="margin-bottom:8px;font-size:11px;color:var(--accent-cyan)">⚡ 流式响应 · ${ev.chunk_count} 个片段 · 已聚合</div>`:'';
   let h=`<div class="view-toggle"><button class="view-toggle-btn active" id="vt-r-${uid}" onclick="switchRespView('${uid}','render')">渲染视图</button><button class="view-toggle-btn" id="vt-j-${uid}" onclick="switchRespView('${uid}','raw')">原始JSON</button></div>`;
-  h+=`<div id="vv-r-${uid}">`;
+  h+=`<div id="vv-r-${uid}">${streamInfo}`;
   if(contentText) h+=renderResponseContent(contentText);
   else h+='<div style="color:var(--text-muted);padding:8px;font-style:italic">无文本内容</div>';
   h+='</div>';
   h+=`<div id="vv-j-${uid}" style="display:none">`;
-  if(ev.input_tokens||ev.output_tokens) h+=`<div style="margin-bottom:12px"><div class="token-viz"><div class="token-box"><div class="tv-val" style="color:var(--accent-blue)">${fmtNum(ev.input_tokens||0)}</div><div class="tv-lbl">输入</div></div><div class="token-box"><div class="tv-val" style="color:var(--accent-green)">${fmtNum(ev.output_tokens||0)}</div><div class="tv-lbl">输出</div></div></div></div>`;
+  // Token 成本信息
+  if(ev.input_tokens||ev.output_tokens) {
+    const inp=ev.input_tokens||0,outp=ev.output_tokens||0;
+    const inpCost=ev.cost_usd?`($${((inp/(inp+outp||1))*ev.cost_usd).toFixed(6)})`:'' ;
+    const outpCost=ev.cost_usd?`($${((outp/(inp+outp||1))*ev.cost_usd).toFixed(6)})`:'' ;
+    h+=`<div style="margin-bottom:12px"><div class="token-viz"><div class="token-box"><div class="tv-val" style="color:var(--accent-blue)">${fmtNum(inp)}</div><div class="tv-lbl">输入 ${inpCost}</div></div><div class="token-box"><div class="tv-val" style="color:var(--accent-green)">${fmtNum(outp)}</div><div class="tv-lbl">输出 ${outpCost}</div></div>${ev.cost_usd!=null?`<div class="token-box"><div class="tv-val" style="color:var(--accent-yellow)">${fmtCost(ev.cost_usd)}</div><div class="tv-lbl">合计成本</div></div>`:''}` +'</div></div>';
+  }
   h+=jsonBlock(ev.response_body,'res_'+uid);
   h+='</div>';
   body.innerHTML=h;
@@ -1239,6 +1389,7 @@ async function refreshStats(){
     document.getElementById('st-tok').textContent=fmtNum(s.total_tokens);
     document.getElementById('st-rpm').textContent=s.rpm;
     if(s.rpm_history){rpmHistory=s.rpm_history;updateSparkline();}
+    if(s.total_cost_usd!=null){const c=s.total_cost_usd;document.getElementById('st-cost').textContent=c===0?'$0':c<1?'$'+c.toFixed(4):'$'+c.toFixed(2);}
   }catch{}
   try{
     const d=await apiFetch('/stats/daily').then(r=>r.json());
@@ -1291,6 +1442,16 @@ async function openStatDetail(type){
     if(!lastStatsData){body.innerHTML='<div class="empty-state">暂无数据</div>';return;}
     const s=lastStatsData;
     body.innerHTML=`<div class="token-viz"><div class="token-box"><div class="tv-val" style="color:var(--accent-green)">${s.success_count}</div><div class="tv-lbl">成功</div></div><div class="token-box"><div class="tv-val" style="color:var(--accent-red)">${s.failure_count}</div><div class="tv-lbl">失败</div></div><div class="token-box"><div class="tv-val" style="color:var(--accent-blue)">${s.success_rate}%</div><div class="tv-lbl">成功率</div></div></div>`;
+  }else if(type==='cost'){
+    document.getElementById('stat-popup-title').textContent='成本分布 - 各模型';
+    try{
+      const d=await apiFetch('/stats/models?hours=24').then(r=>r.json());
+      if(!d.models.length){body.innerHTML='<div class="empty-state">暂无数据</div>';return;}
+      const total=d.models.reduce((s,m)=>s+(m.cost_usd||0),0)||1;
+      let h='<table style="width:100%;border-collapse:collapse;font-size:12px"><tr><th style="text-align:left;padding:6px;border-bottom:1px solid var(--border);color:var(--text-muted)">模型</th><th style="text-align:right;padding:6px;border-bottom:1px solid var(--border);color:var(--text-muted)">请求数</th><th style="text-align:right;padding:6px;border-bottom:1px solid var(--border);color:var(--text-muted)">成本(USD)</th><th style="text-align:right;padding:6px;border-bottom:1px solid var(--border);color:var(--text-muted)">占比</th></tr>';
+      for(const m of d.models){const c=m.cost_usd||0;h+=`<tr><td style="padding:6px;border-bottom:1px solid var(--border-muted)">${escapeHtml(m.model)}</td><td style="text-align:right;padding:6px;border-bottom:1px solid var(--border-muted);color:var(--accent-blue)">${fmtNum(m.requests)}</td><td style="text-align:right;padding:6px;border-bottom:1px solid var(--border-muted);color:var(--accent-yellow)">${c<0.0001?c.toFixed(6):c<0.01?c.toFixed(4):'$'+c.toFixed(2)}</td><td style="text-align:right;padding:6px;border-bottom:1px solid var(--border-muted);color:var(--text-muted)">${Math.round(c/total*100)}%</td></tr>`;}
+      body.innerHTML=h+'</table>';
+    }catch{body.innerHTML='<div class="empty-state">加载失败</div>';}
   }else{
     document.getElementById('stat-popup-title').textContent='请求统计';
     if(!lastStatsData){body.innerHTML='<div class="empty-state">暂无数据</div>';return;}
@@ -1312,6 +1473,7 @@ async function loadHistory(){
   const start=document.getElementById('f-start').value;if(start)p.set('start_time',new Date(start).toISOString());
   const end=document.getElementById('f-end').value;if(end)p.set('end_time',new Date(end).toISOString());
   if(document.getElementById('f-annotated').checked)p.set('annotated_only','true');
+  const costTier=document.getElementById('f-cost-tier').value;if(costTier)p.set('cost_tier',costTier);
   try{const d=await apiFetch('/logs?'+p).then(r=>r.json());allLogs=d.data||[];filteredLogs=d.data;totalFromServer=d.total;renderList();}
   catch(e){if(e.message!=='401')document.getElementById('log-list').innerHTML='<div class="empty-state"><div class="empty-icon">⚠️</div>加载日志失败。<div class="empty-hint"><button class="page-btn" onclick="loadHistory()" style="margin-top:8px">重试</button></div></div>';}
 }
@@ -1339,7 +1501,7 @@ async function confirmDeleteOld(){
 // COL PREFS
 function loadColPrefs(){try{const s=localStorage.getItem('llm_col_prefs');if(s)colPrefs={...colPrefs,...JSON.parse(s)};}catch{}document.querySelectorAll('[data-col]').forEach(cb=>{const k=cb.dataset.col;if(k in colPrefs)cb.checked=colPrefs[k];});applyColPrefs();}
 function saveColPrefs(){document.querySelectorAll('[data-col]').forEach(cb=>{colPrefs[cb.dataset.col]=cb.checked;});localStorage.setItem('llm_col_prefs',JSON.stringify(colPrefs));applyColPrefs();renderList();}
-function applyColPrefs(){['evt','model','time','dur','tok'].forEach(k=>{const hdr=document.getElementById('hdr-'+k);if(hdr)hdr.style.display=colPrefs[k]?'':'none';});}
+function applyColPrefs(){['evt','model','time','dur','tok','cost'].forEach(k=>{const hdr=document.getElementById('hdr-'+k);if(hdr)hdr.style.display=colPrefs[k]?'':'none';});}
 function toggleColPicker(e){e.stopPropagation();document.getElementById('col-picker').classList.toggle('open');}
 document.addEventListener('click',()=>document.getElementById('col-picker').classList.remove('open'));
 
@@ -1364,7 +1526,7 @@ function showContextMenu(ev,entry){
 function hideContextMenu(){document.getElementById('ctx-menu').style.display='none';}
 document.addEventListener('click',hideContextMenu);
 document.addEventListener('keydown',e=>{
-  if(e.key==='Escape'){closeModal();hideContextMenu();document.getElementById('stat-popup').classList.remove('open');closeCompare();}
+  if(e.key==='Escape'){closeModal();hideContextMenu();document.getElementById('stat-popup').classList.remove('open');closeCompare();closeAlertConfig();closeAlertHistory();}
   if(e.key==='/'&&document.activeElement.tagName!=='INPUT'){e.preventDefault();document.getElementById('f-keyword').focus();}
   if(e.key===' '&&document.activeElement.tagName!=='INPUT'){e.preventDefault();toggleLive();}
 });
@@ -1414,6 +1576,85 @@ setInterval(()=>{
   else document.getElementById('idle-notice').style.display='none';
 },10000);
 
+// ALERT CONFIG
+async function openAlertConfig(){
+  document.getElementById('alert-modal').style.display='flex';
+  await loadAlertConfig();
+}
+function closeAlertConfig(){document.getElementById('alert-modal').style.display='none';}
+async function loadAlertConfig(){
+  try{
+    const d=await apiFetch('/alerts/config').then(r=>r.json());
+    document.getElementById('ac-tg-chat').value=d.telegram_chat_id||'';
+    document.getElementById('ac-webhook').value=d.webhook_url||'';
+    const rules=d.alert_rules||{};
+    document.getElementById('ac-err-en').checked=rules.error_rate_enabled??true;
+    document.getElementById('ac-err-thr').value=rules.error_rate_threshold??20;
+    document.getElementById('ac-lat-en').checked=rules.latency_enabled??true;
+    document.getElementById('ac-lat-thr').value=rules.latency_threshold??30;
+    document.getElementById('ac-big-en').checked=rules.large_request_enabled??true;
+    document.getElementById('ac-big-thr').value=rules.large_request_threshold??100000;
+    document.getElementById('ac-tok-en').checked=rules.daily_quota_enabled??false;
+    document.getElementById('ac-tok-thr').value=rules.daily_quota_millions??10;
+    const msg=document.getElementById('ac-msg');
+    msg.textContent=d.has_telegram_token?'✅ Telegram Token 已配置':'⚠️ 未配置 Telegram Token';
+    msg.style.color=d.has_telegram_token?'var(--accent-green)':'var(--accent-yellow)';
+  }catch{}
+}
+async function saveAlertConfig(){
+  const body={
+    telegram_token:document.getElementById('ac-tg-token').value.trim()||null,
+    telegram_chat_id:document.getElementById('ac-tg-chat').value.trim()||null,
+    webhook_url:document.getElementById('ac-webhook').value.trim()||null,
+    alert_rules:{
+      error_rate_enabled:document.getElementById('ac-err-en').checked,
+      error_rate_threshold:parseFloat(document.getElementById('ac-err-thr').value)||20,
+      latency_enabled:document.getElementById('ac-lat-en').checked,
+      latency_threshold:parseFloat(document.getElementById('ac-lat-thr').value)||30,
+      large_request_enabled:document.getElementById('ac-big-en').checked,
+      large_request_threshold:parseInt(document.getElementById('ac-big-thr').value)||100000,
+      daily_quota_enabled:document.getElementById('ac-tok-en').checked,
+      daily_quota_millions:parseFloat(document.getElementById('ac-tok-thr').value)||10,
+    }
+  };
+  try{
+    await apiFetch('/alerts/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    document.getElementById('ac-msg').textContent='✅ 配置已保存';document.getElementById('ac-msg').style.color='var(--accent-green)';
+    setTimeout(closeAlertConfig,800);
+  }catch{document.getElementById('ac-msg').textContent='❌ 保存失败';document.getElementById('ac-msg').style.color='var(--accent-red)';}
+}
+async function testAlertSend(){
+  try{
+    const r=await apiFetch('/alerts/test',{method:'POST'});
+    const d=await r.json();
+    alert(d.message||'测试消息已发送');
+  }catch{alert('发送失败，请检查配置');}
+}
+async function toggleAlertHistory(){
+  const pop=document.getElementById('alert-history-popup');
+  if(pop.style.display==='block'){pop.style.display='none';return;}
+  pop.style.display='block';
+  const body=document.getElementById('alert-hist-body');
+  body.innerHTML='<div class="skeleton skel-line w80" style="margin:10px 0"></div>';
+  try{
+    const d=await apiFetch('/alerts/history').then(r=>r.json());
+    if(!d.alerts||!d.alerts.length){body.innerHTML='<div style="color:var(--text-muted);font-size:12px;padding:10px">暂无告警记录</div>';return;}
+    body.innerHTML=d.alerts.map(a=>`<div style="padding:8px 0;border-bottom:1px solid var(--border-muted)"><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px"><span style="color:var(--accent-red);font-weight:600">${escapeHtml(a.alert_type||'')}</span><span style="color:var(--text-muted)">${fmtDateTime(a.created_at)}</span></div><div style="font-size:12px">${escapeHtml(a.message||'')}</div></div>`).join('');
+    await apiFetch('/alerts/read',{method:'POST'});
+    alertUnread=0;refreshAlertBadge();
+  }catch{body.innerHTML='<div style="color:var(--text-muted);font-size:12px;padding:10px">加载失败</div>';}
+}
+function closeAlertHistory(){document.getElementById('alert-history-popup').style.display='none';}
+async function refreshAlertBadge(){
+  try{
+    const d=await apiFetch('/alerts/history').then(r=>r.json());
+    alertUnread=(d.alerts||[]).filter(a=>!a.is_read).length;
+    const badge=document.getElementById('alert-badge');
+    if(alertUnread>0){badge.textContent=alertUnread;badge.style.display='inline-block';}
+    else{badge.style.display='none';}
+  }catch{}
+}
+
 // INIT
 async function initApp(){
   setupMarked();loadColPrefs();connectWS();refreshStats();refreshModels();
@@ -1424,7 +1665,7 @@ async function initApp(){
   filteredLogs=allLogs.filter(matchFilter);renderList();
   liveMode=true;lastActivityTime=Date.now();document.getElementById('btn-live').classList.add('active');
   if(directReqId){const entry=allLogs.find(e=>e.request_id===directReqId);if(entry)setTimeout(()=>openModalForReqId(directReqId,entry),300);}
-  setInterval(refreshStats,10000);setInterval(refreshModels,30000);setInterval(()=>{if(chartsOpen)refreshCharts();},30000);
+  setInterval(refreshStats,10000);setInterval(refreshModels,30000);setInterval(()=>{if(chartsOpen)refreshCharts();},30000);setInterval(refreshAlertBadge,60000);refreshAlertBadge();
 }
 (async function boot(){
   const valid=await checkAuth();
