@@ -450,6 +450,8 @@ class LogEntry(BaseModel):
     request_body: Optional[dict] = None
     response_body: Optional[dict] = None
     chunk_data: Optional[str] = None
+    chunk_count: Optional[int] = None
+    stream_content: Optional[str] = None
     error: Optional[str] = None
     metadata: Optional[dict] = None
 
@@ -557,9 +559,14 @@ async def receive_log(entry: LogEntry):
     if entry.event_type == "success":
         rid = entry.request_id or ""
         if rid and rid in _chunk_buffer:
+            # 有 chunk 事件积累的情况（逐 chunk 模式）
             chunks = _chunk_buffer.pop(rid)
             chunk_count = len(chunks)
             stream_content = "".join(chunks)
+        elif entry.chunk_count and entry.chunk_count > 0:
+            # callback 直接传来的 chunk_count（聚合模式，如 litellm success 事件）
+            chunk_count = entry.chunk_count
+            stream_content = entry.stream_content
         # 大请求告警
         ac = get_alert_config()
         if ac.get("large_request_enabled", True):
