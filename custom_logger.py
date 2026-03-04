@@ -267,7 +267,7 @@ class CustomLogger(_Base):
                 if delta:
                     chunk_text = (
                         getattr(delta, "content", "") or
-                        getattr(delta, "thinking", "") or
+                        getattr(delta, "reasoning_content", "") or
                         ""
                     )
         except Exception:
