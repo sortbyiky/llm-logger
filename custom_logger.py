@@ -215,6 +215,14 @@ class CustomLogger(_Base):
         except Exception:
             pass
 
+        is_stream = kwargs.get("stream", False)
+        # 流式请求：从聚合响应中估算 chunk 数（按词数粗略估算）
+        chunk_count = 0
+        stream_content = None
+        if is_stream and reply_text:
+            stream_content = reply_text
+            chunk_count = max(1, len(reply_text.split()))
+
         _fire({
             "request_id": request_id,
             "event_type": "success",
@@ -224,8 +232,10 @@ class CustomLogger(_Base):
             "output_tokens": output_tokens,
             "response_body": _safe_json(_to_dict(response_obj)),
             "chunk_data": reply_text,
+            "chunk_count": chunk_count,
+            "stream_content": stream_content,
             "metadata": {
-                "stream": kwargs.get("stream", False),
+                "stream": is_stream,
                 "api_base": str(kwargs.get("api_base", "")),
                 "response_cost": kwargs.get("response_cost"),
             },
