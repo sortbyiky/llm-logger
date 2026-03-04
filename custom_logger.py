@@ -296,7 +296,9 @@ def _register():
             litellm.success_callback.append(customHandler)
         if customHandler not in litellm.failure_callback:
             litellm.failure_callback.append(customHandler)
-        print("[custom_logger] Registered to all events (callbacks/input/success/failure)")
+        if customHandler not in litellm.streaming_callback:
+            litellm.streaming_callback.append(customHandler)
+        print("[custom_logger] Registered to all events (callbacks/input/success/failure/streaming)")
     except Exception as e:
         print(f"[custom_logger] Registration failed: {e}")
 
