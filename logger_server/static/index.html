@@ -1,0 +1,1435 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM 请求监控</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css">
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/highlight.min.js"></script>
+<style>
+:root {
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-tertiary: #21262d;
+  --bg-hover: #30363d;
+  --border: #30363d;
+  --border-muted: #21262d;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #6e7681;
+  --accent-blue: #388bfd;
+  --accent-green: #3fb950;
+  --accent-red: #f85149;
+  --accent-yellow: #d29922;
+  --accent-purple: #bc8cff;
+  --accent-orange: #f0883e;
+  --accent-cyan: #39d353;
+  --radius: 6px;
+  --sidebar-w: 220px;
+  --header-h: 56px;
+  --stats-h: 88px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg-primary); color: var(--text-primary); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace; font-size: 13px; overflow: hidden; height: 100vh; }
+
+/* LOGIN */
+#login-page { display:none; position:fixed; inset:0; background:var(--bg-primary); z-index:9999; align-items:center; justify-content:center; }
+#login-page.show { display:flex; }
+.login-card { background:var(--bg-secondary); border:1px solid var(--border); border-radius:12px; padding:40px; width:360px; text-align:center; box-shadow:0 24px 80px rgba(0,0,0,.6); }
+.login-logo { font-size:32px; margin-bottom:8px; }
+.login-title { font-size:20px; font-weight:700; margin-bottom:4px; }
+.login-sub { font-size:12px; color:var(--text-muted); margin-bottom:28px; }
+.login-input { width:100%; background:var(--bg-tertiary); border:1px solid var(--border); color:var(--text-primary); border-radius:var(--radius); padding:10px 14px; font-size:14px; outline:none; margin-bottom:12px; }
+.login-input:focus { border-color:var(--accent-blue); }
+.login-btn { width:100%; background:var(--accent-blue); border:none; color:#fff; padding:11px; border-radius:var(--radius); font-size:14px; font-weight:600; cursor:pointer; transition:opacity .15s; }
+.login-btn:hover { opacity:.85; }
+.login-err { color:var(--accent-red); font-size:12px; margin-top:8px; min-height:16px; }
+@keyframes shake { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-8px)} 40%{transform:translateX(8px)} 60%{transform:translateX(-6px)} 80%{transform:translateX(6px)} }
+.shake { animation:shake .4s ease; }
+
+/* HEADER */
+#header {
+  position:fixed; top:0; left:0; right:0; height:var(--header-h);
+  background:var(--bg-secondary); border-bottom:1px solid var(--border);
+  display:flex; align-items:center; padding:0 16px; gap:10px; z-index:100;
+}
+#header .brand { font-weight:700; font-size:15px; color:var(--text-primary); letter-spacing:-.3px; white-space:nowrap; }
+#header .brand span { color:var(--accent-blue); }
+#ws-status { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--text-secondary); white-space:nowrap; }
+#ws-dot { width:7px; height:7px; border-radius:50%; background:var(--accent-red); transition:background .3s; flex-shrink:0; }
+#ws-dot.connected { background:var(--accent-green); }
+#ws-dot.connecting { background:var(--accent-yellow); animation:pulse 1s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+#rpm-spark { display:flex; align-items:flex-end; gap:2px; height:24px; margin:0 4px; }
+.spark-bar { width:4px; background:var(--accent-blue); border-radius:1px; opacity:.7; transition:height .3s; min-height:2px; }
+#idle-notice { font-size:11px; color:var(--accent-yellow); display:none; }
+.spacer { flex:1; }
+.hdr-btn { background:var(--bg-tertiary); border:1px solid var(--border); color:var(--text-secondary); padding:5px 11px; border-radius:var(--radius); cursor:pointer; font-size:12px; transition:all .15s; white-space:nowrap; }
+.hdr-btn:hover { background:var(--bg-hover); color:var(--text-primary); }
+.hdr-btn.active { background:var(--accent-blue); border-color:var(--accent-blue); color:#fff; }
+#account-wrap { position:relative; }
+#account-menu { display:none; position:absolute; top:calc(100%+4px); right:0; background:var(--bg-secondary); border:1px solid var(--border); border-radius:var(--radius); min-width:150px; z-index:200; box-shadow:0 8px 24px rgba(0,0,0,.4); }
+#account-menu.open { display:block; }
+.acct-item { padding:8px 14px; cursor:pointer; font-size:12px; color:var(--text-secondary); transition:background .1s; }
+.acct-item:hover { background:var(--bg-hover); color:var(--text-primary); }
+
+/* STATS */
+#stats-bar { position:fixed; top:var(--header-h); left:0; right:0; height:var(--stats-h); background:var(--bg-secondary); border-bottom:1px solid var(--border); display:flex; align-items:center; padding:0 12px; gap:8px; z-index:99; overflow-x:auto; }
+.stat-card { background:var(--bg-tertiary); border:1px solid var(--border); border-radius:var(--radius); padding:10px 16px; min-width:110px; flex-shrink:0; cursor:pointer; transition:border-color .15s; }
+.stat-card:hover { border-color:var(--accent-blue); }
+.stat-card .label { font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
+.stat-card .value { font-size:20px; font-weight:700; color:var(--text-primary); font-variant-numeric:tabular-nums; }
+.stat-card .value.green { color:var(--accent-green); }
+.stat-card .value.red { color:var(--accent-red); }
+.stat-card .value.blue { color:var(--accent-blue); }
+.stat-card .value.yellow { color:var(--accent-yellow); }
+.stat-card .value.purple { color:var(--accent-purple); }
+.stat-card .sub { font-size:10px; color:var(--text-muted); margin-top:2px; }
+.stat-card .sub.up { color:var(--accent-green); }
+.stat-card .sub.down { color:var(--accent-red); }
+
+/* LAYOUT */
+#layout { position:fixed; top:calc(var(--header-h) + var(--stats-h)); bottom:0; left:0; right:0; display:flex; overflow:hidden; }
+#sidebar { width:var(--sidebar-w); background:var(--bg-secondary); border-right:1px solid var(--border); display:flex; flex-direction:column; overflow-y:auto; flex-shrink:0; }
+.sidebar-section { padding:10px; border-bottom:1px solid var(--border-muted); }
+.sidebar-section h4 { font-size:10px; text-transform:uppercase; color:var(--text-muted); letter-spacing:.5px; margin-bottom:8px; }
+.filter-label { font-size:11px; color:var(--text-secondary); margin-bottom:3px; margin-top:7px; }
+.filter-label:first-of-type { margin-top:0; }
+.filter-input, .filter-select { width:100%; background:var(--bg-tertiary); border:1px solid var(--border); color:var(--text-primary); border-radius:var(--radius); padding:5px 8px; font-size:12px; outline:none; }
+.filter-input:focus, .filter-select:focus { border-color:var(--accent-blue); }
+.filter-select option { background:var(--bg-secondary); }
+.evt-checks { display:flex; flex-direction:column; gap:4px; }
+.evt-check { display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px; }
+.evt-check input { accent-color:var(--accent-blue); cursor:pointer; }
+.evt-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.sidebar-btn { width:100%; background:var(--bg-tertiary); border:1px solid var(--border); color:var(--text-secondary); padding:6px 10px; border-radius:var(--radius); cursor:pointer; font-size:12px; text-align:left; margin-bottom:4px; transition:all .15s; }
+.sidebar-btn:hover { background:var(--bg-hover); color:var(--text-primary); }
+.annotated-toggle { display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer; margin-top:4px; }
+.annotated-toggle input { accent-color:var(--accent-blue); }
+
+/* SEARCH ROW */
+.search-row { display:flex; gap:4px; align-items:center; }
+.search-row .filter-input { flex:1; }
+.regex-btn { background:var(--bg-tertiary); border:1px solid var(--border); color:var(--text-muted); padding:5px 7px; border-radius:var(--radius); cursor:pointer; font-size:10px; white-space:nowrap; flex-shrink:0; }
+.regex-btn.active { border-color:var(--accent-yellow); color:var(--accent-yellow); }
+
+/* MAIN */
+#main { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+#charts-panel { background:var(--bg-secondary); border-bottom:1px solid var(--border); overflow:hidden; transition:max-height .3s ease; max-height:0; }
+#charts-panel.open { max-height:280px; }
+#charts-inner { display:flex; gap:10px; padding:10px; height:260px; }
+.chart-box { flex:1; background:var(--bg-tertiary); border:1px solid var(--border); border-radius:var(--radius); padding:8px; min-width:0; }
+.chart-box h5 { font-size:10px; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px; }
+
+/* BATCH BAR */
+#batch-bar { background:rgba(56,139,253,.1); border-bottom:1px solid var(--accent-blue); padding:6px 12px; display:none; align-items:center; gap:10px; font-size:12px; }
+#batch-bar.show { display:flex; }
+#batch-bar .batch-count { color:var(--accent-blue); font-weight:600; }
+.batch-btn { background:var(--bg-tertiary); border:1px solid var(--border); color:var(--text-secondary); padding:4px 10px; border-radius:var(--radius); cursor:pointer; font-size:11px; }
+.batch-btn:hover { color:var(--text-primary); }
+.batch-btn.danger { border-color:var(--accent-red); color:var(--accent-red); }
+
+/* LOG HEADER */
+#log-header { background:var(--bg-secondary); border-bottom:1px solid var(--border); padding:6px 12px; display:flex; align-items:center; gap:8px; font-size:11px; color:var(--text-muted); user-select:none; }
+.col-sel   { width:24px; flex-shrink:0; }
+.col-chain { width:18px; flex-shrink:0; }
+.col-evt   { width:130px; flex-shrink:0; white-space:nowrap; display:flex; align-items:center; gap:3px; flex-wrap:nowrap; }
+.col-model { width:120px; flex-shrink:0; }
+.col-req   { width:130px; flex-shrink:0; }
+.col-msg   { flex:1; }
+.col-time  { width:75px; flex-shrink:0; text-align:right; }
+.col-dur   { width:65px; flex-shrink:0; text-align:right; }
+.col-tok   { width:80px; flex-shrink:0; text-align:right; }
+.col-gear  { width:26px; flex-shrink:0; }
+.gear-btn  { background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:14px; padding:0; line-height:1; }
+.gear-btn:hover { color:var(--text-primary); }
+.col-gear-wrap { position:relative; }
+#col-picker { display:none; position:absolute; right:0; top:calc(100%+4px); background:var(--bg-secondary); border:1px solid var(--border); border-radius:var(--radius); padding:8px; min-width:160px; z-index:200; box-shadow:0 8px 24px rgba(0,0,0,.4); }
+#col-picker.open { display:block; }
+.col-pick-item { display:flex; align-items:center; gap:6px; padding:4px 0; font-size:12px; cursor:pointer; }
+.col-pick-item input { accent-color:var(--accent-blue); }
+
+#filter-tags { padding:4px 12px; display:flex; flex-wrap:wrap; gap:4px; min-height:0; }
+.filter-tag { background:var(--bg-tertiary); border:1px solid var(--accent-blue); color:var(--accent-blue); border-radius:10px; padding:1px 8px; font-size:11px; display:flex; align-items:center; gap:4px; }
+.filter-tag .rm { cursor:pointer; color:var(--text-muted); font-size:13px; }
+.filter-tag .rm:hover { color:var(--accent-red); }
+
+#log-list { flex:1; overflow-y:auto; }
+.log-row { display:flex; align-items:center; gap:8px; padding:5px 12px; border-bottom:1px solid var(--border-muted); cursor:pointer; transition:filter .1s; position:relative; }
+.log-row:hover { filter:brightness(1.25); }
+.log-row.selected { outline:2px solid var(--accent-blue); outline-offset:-2px; }
+.log-row.new-entry { animation:flashIn .6s ease; }
+@keyframes flashIn { from{filter:brightness(2)} to{filter:brightness(1)} }
+.row-cb { width:24px; flex-shrink:0; opacity:0; transition:opacity .15s; }
+.log-row:hover .row-cb, .log-row.checked .row-cb { opacity:1; }
+.row-cb input { accent-color:var(--accent-blue); cursor:pointer; }
+.chain-dot-indicator { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.chain-dot-indicator.complete { background:var(--accent-green); }
+.chain-dot-indicator.failed { background:var(--accent-red); }
+.chain-dot-indicator.partial { background:var(--accent-yellow); }
+.chain-dot-indicator.none { background:transparent; }
+.col-req-cell { width:130px; flex-shrink:0; display:flex; align-items:center; gap:5px; cursor:pointer; }
+.req-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.req-id-text { font-family:monospace; font-size:10px; color:var(--accent-blue); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.req-id-text:hover { text-decoration:underline; }
+.col-model-cell { width:120px; flex-shrink:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-secondary); font-size:11px; }
+.col-msg-cell { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-secondary); font-size:12px; }
+.col-time-cell { width:75px; flex-shrink:0; text-align:right; font-size:10px; color:var(--text-muted); cursor:pointer; white-space:nowrap; }
+.col-time-cell:hover { color:var(--text-primary); }
+.col-dur-cell { width:65px; flex-shrink:0; text-align:right; font-size:11px; white-space:nowrap; }
+.col-tok-cell { width:80px; flex-shrink:0; text-align:right; font-size:10px; color:var(--text-muted); display:flex; flex-direction:column; align-items:flex-end; gap:2px; }
+.tok-num { font-size:11px; }
+.tok-bar-wrap { width:100%; height:3px; background:var(--bg-hover); border-radius:2px; }
+.tok-bar { height:3px; background:var(--accent-purple); border-radius:2px; max-width:100%; }
+.note-pin { font-size:11px; margin-left:2px; }
+.evt-badge { display:inline-flex; align-items:center; gap:4px; padding:2px 7px; border-radius:10px; font-size:10px; font-weight:600; white-space:nowrap; }
+.stream-badge { display:inline-flex; align-items:center; padding:1px 4px; border-radius:8px; font-size:9px; font-weight:600; white-space:nowrap; flex-shrink:0; }
+.stream-badge.stream { background:rgba(57,211,83,.15); color:#39d353; border:1px solid rgba(57,211,83,.3); }
+.stream-badge.sync { background:rgba(56,139,253,.15); color:#388bfd; border:1px solid rgba(56,139,253,.3); }
+.evt-raw_request { background:rgba(188,140,255,.15); color:var(--accent-purple); }
+.evt-pre_call { background:rgba(56,139,253,.15); color:var(--accent-blue); }
+.evt-post_call { background:rgba(57,211,83,.15); color:var(--accent-cyan); }
+.evt-success { background:rgba(63,185,80,.15); color:var(--accent-green); }
+.evt-failure { background:rgba(248,81,73,.15); color:var(--accent-red); }
+.evt-chunk { background:rgba(240,136,62,.15); color:var(--accent-orange); }
+.dur-fast { color:var(--accent-green); }
+.dur-medium { color:var(--accent-yellow); }
+.dur-slow { color:var(--accent-red); }
+.hl { background:rgba(210,153,34,.35); color:var(--accent-yellow); border-radius:2px; }
+
+/* SKELETON */
+@keyframes shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
+.skeleton { background:linear-gradient(90deg,var(--bg-tertiary) 25%,var(--bg-hover) 50%,var(--bg-tertiary) 75%); background-size:200% 100%; animation:shimmer 1.5s infinite; border-radius:var(--radius); }
+.skel-line { height:14px; margin-bottom:10px; }
+.skel-line.w40 { width:40%; }
+.skel-line.w60 { width:60%; }
+.skel-line.w80 { width:80%; }
+.skel-line.w100 { width:100%; }
+.skel-box { height:80px; width:100%; margin-bottom:10px; }
+
+/* PAGINATION */
+#pagination { background:var(--bg-secondary); border-top:1px solid var(--border); padding:7px 12px; display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-secondary); }
+.page-btn { background:var(--bg-tertiary); border:1px solid var(--border); color:var(--text-secondary); padding:3px 10px; border-radius:var(--radius); cursor:pointer; font-size:12px; }
+.page-btn:hover { background:var(--bg-hover); color:var(--text-primary); }
+.page-btn:disabled { opacity:.4; cursor:not-allowed; }
+
+/* MODAL */
+#modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.75); z-index:500; align-items:center; justify-content:center; }
+#modal-overlay.open { display:flex; }
+#modal { background:var(--bg-secondary); border:1px solid var(--border); border-radius:10px; width:min(1000px,96vw); height:min(88vh,860px); display:flex; flex-direction:column; overflow:hidden; box-shadow:0 24px 80px rgba(0,0,0,.6); }
+#modal-header { padding:14px 18px; border-bottom:1px solid var(--border); display:flex; align-items:flex-start; gap:12px; }
+#modal-meta { flex:1; }
+#modal-title { font-size:14px; font-weight:700; margin-bottom:4px; }
+#modal-sub { font-size:11px; color:var(--text-muted); display:flex; gap:16px; flex-wrap:wrap; }
+#modal-sub span { display:flex; gap:4px; align-items:center; }
+#modal-close { background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:22px; padding:0 4px; line-height:1; flex-shrink:0; }
+#modal-close:hover { color:var(--text-primary); }
+.modal-tab-bar { display:flex; border-bottom:1px solid var(--border); padding:0 18px; overflow-x:auto; }
+.modal-tab-btn { background:none; border:none; color:var(--text-muted); padding:9px 14px; cursor:pointer; font-size:12px; border-bottom:2px solid transparent; margin-bottom:-1px; white-space:nowrap; }
+.modal-tab-btn:hover { color:var(--text-primary); }
+.modal-tab-btn.active { color:var(--accent-blue); border-bottom-color:var(--accent-blue); }
+#modal-body { flex:1; overflow-y:auto; padding:16px 18px; }
+
+/* GANTT */
+.gantt-wrap { margin-bottom:20px; }
+.gantt-wrap h4 { font-size:11px; color:var(--text-muted); text-transform:uppercase; margin-bottom:10px; }
+.gantt-row { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+.gantt-label { width:110px; font-size:11px; flex-shrink:0; }
+.gantt-track { flex:1; height:20px; background:var(--bg-tertiary); border-radius:4px; position:relative; overflow:hidden; }
+.gantt-segment { position:absolute; top:0; height:100%; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:9px; white-space:nowrap; overflow:hidden; padding:0 4px; }
+.gantt-dur { width:60px; text-align:right; font-size:11px; color:var(--text-muted); flex-shrink:0; }
+.gantt-time { width:55px; text-align:right; font-size:10px; color:var(--text-muted); flex-shrink:0; }
+.chain-stage { display:flex; align-items:flex-start; gap:10px; margin-bottom:14px; position:relative; }
+.chain-stage::before { content:''; position:absolute; left:9px; top:22px; bottom:-14px; width:2px; background:var(--border); }
+.chain-stage:last-child::before { display:none; }
+.chain-dot { width:20px; height:20px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:9px; font-weight:700; }
+.chain-content { flex:1; }
+.chain-type { font-size:11px; font-weight:600; margin-bottom:2px; }
+.chain-meta { font-size:10px; color:var(--text-muted); }
+.token-viz { display:flex; gap:8px; margin-top:8px; }
+.token-box { flex:1; background:var(--bg-tertiary); border-radius:var(--radius); padding:8px; text-align:center; }
+.token-box .tv-val { font-size:18px; font-weight:700; }
+.token-box .tv-lbl { font-size:10px; color:var(--text-muted); margin-top:2px; }
+.token-split { display:flex; height:8px; border-radius:4px; overflow:hidden; margin-top:6px; }
+.token-split .inp { background:var(--accent-blue); }
+.token-split .outp { background:var(--accent-green); }
+
+/* JSON */
+.json-wrap { background:var(--bg-tertiary); border:1px solid var(--border); border-radius:var(--radius); padding:10px; overflow-y:auto; max-height:480px; position:relative; margin-top:6px; }
+.json-copy { position:absolute; top:6px; right:6px; background:var(--bg-hover); border:1px solid var(--border); color:var(--text-secondary); padding:2px 8px; border-radius:var(--radius); cursor:pointer; font-size:11px; z-index:1; }
+.json-copy:hover { color:var(--text-primary); }
+pre.json-code { font-family:'Menlo','Consolas',monospace; font-size:11px; white-space:pre-wrap; word-break:break-all; line-height:1.5; }
+.jk{color:var(--accent-blue)} .js{color:var(--accent-green)} .jn{color:var(--accent-purple)} .jb{color:var(--accent-orange)} .jnull{color:var(--text-muted);font-style:italic}
+.empty-state { text-align:center; color:var(--text-muted); padding:60px 20px; font-size:14px; }
+.empty-icon { font-size:40px; margin-bottom:12px; }
+.empty-hint { font-size:12px; margin-top:8px; }
+
+/* MESSAGES */
+.msg-card { border-radius:var(--radius); padding:12px 14px; margin-bottom:10px; position:relative; }
+.msg-card.user { border-left:3px solid var(--accent-blue); background:rgba(56,139,253,.08); }
+.msg-card.assistant { border-left:3px solid var(--accent-green); background:rgba(63,185,80,.06); }
+.msg-card.system { border-left:3px solid var(--accent-yellow); background:rgba(210,153,34,.06); }
+.msg-role-label { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px; }
+.msg-role-label.user { color:var(--accent-blue); }
+.msg-role-label.assistant { color:var(--accent-green); }
+.msg-role-label.system { color:var(--accent-yellow); }
+.msg-body { font-size:12px; line-height:1.7; }
+.msg-body.truncated { max-height:100px; overflow:hidden; }
+.msg-expand { font-size:11px; color:var(--accent-blue); cursor:pointer; margin-top:4px; }
+.msg-copy-btn { position:absolute; top:8px; right:8px; background:var(--bg-hover); border:1px solid var(--border); color:var(--text-muted); padding:2px 8px; border-radius:var(--radius); cursor:pointer; font-size:10px; opacity:0; transition:opacity .15s; }
+.msg-card:hover .msg-copy-btn { opacity:1; }
+.msg-copy-btn:hover { color:var(--text-primary); }
+.msg-stats { font-size:11px; color:var(--text-muted); margin-bottom:12px; display:flex; gap:12px; flex-wrap:wrap; }
+.msg-stats span { background:var(--bg-tertiary); padding:2px 8px; border-radius:10px; }
+
+/* THINK BLOCK */
+.think-block { border:1px solid var(--border); border-radius:var(--radius); margin:8px 0; }
+.think-header { padding:8px 12px; cursor:pointer; display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-muted); user-select:none; }
+.think-header:hover { color:var(--text-primary); }
+.think-arrow { transition:transform .2s; }
+.think-block.open .think-arrow { transform:rotate(90deg); }
+.think-content { padding:0 12px 12px; display:none; font-size:12px; line-height:1.6; color:var(--text-secondary); }
+.think-block.open .think-content { display:block; }
+
+/* RENDERED CONTENT */
+.rendered-view { font-size:13px; line-height:1.7; }
+.rendered-view h1,.rendered-view h2,.rendered-view h3,.rendered-view h4 { margin:16px 0 8px; color:var(--text-primary); }
+.rendered-view h1 { font-size:18px; border-bottom:1px solid var(--border); padding-bottom:8px; }
+.rendered-view h2 { font-size:16px; }
+.rendered-view h3 { font-size:14px; }
+.rendered-view p { margin:8px 0; }
+.rendered-view ul,.rendered-view ol { margin:8px 0 8px 20px; }
+.rendered-view li { margin:4px 0; }
+.rendered-view code { background:var(--bg-tertiary); font-family:monospace; padding:2px 5px; border-radius:3px; font-size:11px; }
+.rendered-view pre { background:var(--bg-tertiary); border:1px solid var(--border); border-radius:var(--radius); padding:12px; overflow-x:auto; margin:10px 0; position:relative; }
+.rendered-view pre code { background:none; padding:0; font-size:12px; }
+.rendered-view blockquote { border-left:3px solid var(--border); padding-left:12px; color:var(--text-secondary); margin:8px 0; }
+.rendered-view table { border-collapse:collapse; width:100%; margin:10px 0; }
+.rendered-view th,.rendered-view td { border:1px solid var(--border); padding:6px 10px; font-size:12px; }
+.rendered-view th { background:var(--bg-tertiary); }
+.rendered-view strong { color:var(--text-primary); }
+.rendered-view a { color:var(--accent-blue); }
+.code-block-wrap { position:relative; }
+.code-copy-btn { position:absolute; top:6px; right:6px; background:var(--bg-hover); border:1px solid var(--border); color:var(--text-muted); padding:2px 8px; border-radius:3px; cursor:pointer; font-size:10px; z-index:1; }
+.code-copy-btn:hover { color:var(--text-primary); }
+.view-toggle { display:flex; gap:6px; margin-bottom:12px; }
+.view-toggle-btn { background:var(--bg-tertiary); border:1px solid var(--border); color:var(--text-muted); padding:5px 12px; border-radius:var(--radius); cursor:pointer; font-size:11px; }
+.view-toggle-btn.active { background:var(--accent-blue); border-color:var(--accent-blue); color:#fff; }
+
+/* CHAT BUBBLES */
+.chat-wrap { padding:8px 0; }
+.bubble-row { display:flex; margin-bottom:12px; }
+.bubble-row.user { justify-content:flex-end; }
+.bubble-row.assistant { justify-content:flex-start; }
+.bubble-row.system { justify-content:center; }
+.bubble { max-width:75%; padding:10px 14px; border-radius:12px; font-size:12px; line-height:1.6; }
+.bubble.user { background:var(--accent-blue); color:#fff; border-bottom-right-radius:3px; }
+.bubble.assistant { background:var(--bg-tertiary); color:var(--text-primary); border-bottom-left-radius:3px; }
+.bubble.system { background:var(--bg-secondary); color:var(--text-secondary); font-size:11px; border:1px solid var(--border); border-radius:20px; padding:5px 14px; }
+.bubble-role { font-size:10px; color:var(--text-muted); margin-bottom:3px; }
+.bubble-row.user .bubble-role { text-align:right; }
+
+/* CONTEXT MENU */
+#ctx-menu { display:none; position:fixed; background:var(--bg-secondary); border:1px solid var(--border); border-radius:var(--radius); z-index:600; min-width:190px; box-shadow:0 8px 24px rgba(0,0,0,.4); overflow:hidden; }
+.ctx-item { padding:8px 14px; cursor:pointer; font-size:12px; color:var(--text-secondary); transition:background .1s; }
+.ctx-item:hover { background:var(--bg-hover); color:var(--text-primary); }
+.ctx-item.danger { color:var(--accent-red); }
+.ctx-sep { height:1px; background:var(--border); margin:4px 0; }
+
+/* STAT DETAIL POPUP */
+#stat-popup { display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:400; align-items:center; justify-content:center; }
+#stat-popup.open { display:flex; }
+.stat-popup-box { background:var(--bg-secondary); border:1px solid var(--border); border-radius:10px; width:min(600px,90vw); max-height:80vh; overflow-y:auto; padding:20px; box-shadow:0 24px 80px rgba(0,0,0,.6); }
+.stat-popup-title { font-size:15px; font-weight:700; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; }
+.stat-popup-close { background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:20px; }
+
+/* COMPARE MODAL */
+#compare-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.75); z-index:550; align-items:center; justify-content:center; }
+#compare-modal.open { display:flex; }
+.compare-box { background:var(--bg-secondary); border:1px solid var(--border); border-radius:10px; width:min(1200px,98vw); height:min(90vh,900px); display:flex; flex-direction:column; overflow:hidden; box-shadow:0 24px 80px rgba(0,0,0,.6); }
+.compare-header { padding:14px 18px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
+.compare-cols { display:flex; flex:1; overflow:hidden; }
+.compare-col { flex:1; overflow-y:auto; padding:14px; border-right:1px solid var(--border); }
+.compare-col:last-child { border-right:none; }
+.compare-col-title { font-size:11px; color:var(--text-muted); text-transform:uppercase; margin-bottom:10px; font-weight:600; }
+
+/* CHANGE PW MODAL */
+#changepw-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.75); z-index:700; align-items:center; justify-content:center; }
+#changepw-modal.open { display:flex; }
+.changepw-box { background:var(--bg-secondary); border:1px solid var(--border); border-radius:10px; width:360px; padding:28px; box-shadow:0 24px 80px rgba(0,0,0,.6); }
+.changepw-title { font-size:15px; font-weight:700; margin-bottom:20px; }
+.changepw-input { width:100%; background:var(--bg-tertiary); border:1px solid var(--border); color:var(--text-primary); border-radius:var(--radius); padding:8px 12px; font-size:13px; outline:none; margin-bottom:10px; }
+.changepw-input:focus { border-color:var(--accent-blue); }
+.changepw-btns { display:flex; gap:8px; margin-top:4px; }
+.changepw-btn { flex:1; padding:8px; border-radius:var(--radius); border:1px solid var(--border); cursor:pointer; font-size:13px; }
+.changepw-btn.primary { background:var(--accent-blue); border-color:var(--accent-blue); color:#fff; }
+.changepw-btn.secondary { background:var(--bg-tertiary); color:var(--text-secondary); }
+.changepw-err { color:var(--accent-red); font-size:11px; margin-bottom:8px; min-height:14px; }
+
+::-webkit-scrollbar { width:6px; height:6px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:var(--bg-hover); border-radius:3px; }
+</style>
+</head>
+<body>
+
+<!-- LOGIN PAGE -->
+<div id="login-page">
+  <div class="login-card">
+    <div class="login-logo">🔍</div>
+    <div class="login-title">LLM 请求监控</div>
+    <div class="login-sub">请输入密码以继续</div>
+    <input class="login-input" type="password" id="login-pw" placeholder="密码" autocomplete="current-password">
+    <button class="login-btn" onclick="doLogin()">登 录</button>
+    <div class="login-err" id="login-err"></div>
+  </div>
+</div>
+
+<!-- CHANGE PASSWORD MODAL -->
+<div id="changepw-modal">
+  <div class="changepw-box">
+    <div class="changepw-title">修改密码</div>
+    <input class="changepw-input" type="password" id="cp-old" placeholder="旧密码">
+    <input class="changepw-input" type="password" id="cp-new" placeholder="新密码（至少4位）">
+    <input class="changepw-input" type="password" id="cp-confirm" placeholder="确认新密码">
+    <div class="changepw-err" id="cp-err"></div>
+    <div class="changepw-btns">
+      <button class="changepw-btn secondary" onclick="closeChangePw()">取消</button>
+      <button class="changepw-btn primary" onclick="doChangePw()">确认修改</button>
+    </div>
+  </div>
+</div>
+
+<!-- HEADER -->
+<div id="header">
+  <div class="brand">LLM <span>请求监控</span></div>
+  <div id="ws-status">
+    <div id="ws-dot" class="connecting"></div>
+    <span id="ws-label">连接中…</span>
+  </div>
+  <div id="rpm-spark"></div>
+  <span id="idle-notice">⏸ 待机中</span>
+  <div class="spacer"></div>
+  <button class="hdr-btn" id="btn-reltime" onclick="toggleRelTime()" title="切换时间格式">🕐 绝对时间</button>
+  <button class="hdr-btn" id="btn-charts" onclick="toggleCharts()">图表</button>
+  <button class="hdr-btn active" id="btn-live" onclick="toggleLive()">实时</button>
+  <button class="hdr-btn active" id="btn-autoscroll" onclick="toggleAutoScroll()">自动滚动</button>
+  <button class="hdr-btn" onclick="clearView()">清空视图</button>
+  <button class="hdr-btn" onclick="showExportMenu()">导出</button>
+  <div class="hdr-btn" id="account-wrap" style="padding:5px 8px;cursor:pointer;" onclick="toggleAccountMenu()">
+    👤
+    <div id="account-menu">
+      <div class="acct-item" onclick="openChangePw()">修改密码</div>
+      <div class="acct-item" onclick="doLogout()" style="color:var(--accent-red)">退出登录</div>
+    </div>
+  </div>
+</div>
+
+<!-- STATS BAR -->
+<div id="stats-bar">
+  <div class="stat-card" onclick="openStatDetail('total')"><div class="label">总请求数</div><div class="value blue" id="st-total">—</div></div>
+  <div class="stat-card" onclick="openStatDetail('rate')"><div class="label">成功率</div><div class="value green" id="st-rate">—</div></div>
+  <div class="stat-card" onclick="openStatDetail('fail')"><div class="label">失败数</div><div class="value red" id="st-fail">—</div></div>
+  <div class="stat-card" onclick="openStatDetail('lat')"><div class="label">平均延迟</div><div class="value yellow" id="st-lat">—</div></div>
+  <div class="stat-card" onclick="openStatDetail('tok')"><div class="label">总Token消耗</div><div class="value purple" id="st-tok">—</div></div>
+  <div class="stat-card"><div class="label">每分钟请求(RPM)</div><div class="value" id="st-rpm">—</div><div class="sub" id="st-compare"></div></div>
+</div>
+
+<!-- STAT DETAIL POPUP -->
+<div id="stat-popup" onclick="closeStatPopup(event)">
+  <div class="stat-popup-box" onclick="event.stopPropagation()">
+    <div class="stat-popup-title"><span id="stat-popup-title">统计详情</span><button class="stat-popup-close" onclick="closeStatPopup()">×</button></div>
+    <div id="stat-popup-body"></div>
+  </div>
+</div>
+
+<div id="layout">
+  <div id="sidebar">
+    <div class="sidebar-section">
+      <h4>事件类型</h4>
+      <div class="evt-checks" id="evt-checks">
+        <label class="evt-check"><input type="checkbox" value="raw_request" onchange="applyFilter()"><div class="evt-dot" style="background:#bc8cff"></div>原始请求</label>
+        <label class="evt-check"><input type="checkbox" value="pre_call" onchange="applyFilter()"><div class="evt-dot" style="background:#388bfd"></div>预处理</label>
+        <label class="evt-check"><input type="checkbox" value="post_call" onchange="applyFilter()"><div class="evt-dot" style="background:#39d353"></div>后处理</label>
+        <label class="evt-check"><input type="checkbox" value="success" onchange="applyFilter()"><div class="evt-dot" style="background:#3fb950"></div>成功</label>
+        <label class="evt-check"><input type="checkbox" value="failure" onchange="applyFilter()"><div class="evt-dot" style="background:#f85149"></div>失败</label>
+        <label class="evt-check"><input type="checkbox" value="chunk" onchange="applyFilter()"><div class="evt-dot" style="background:#f0883e"></div>流式片段</label>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <h4>过滤条件</h4>
+      <div class="filter-label">模型</div>
+      <select class="filter-select" id="f-model" onchange="applyFilter()"><option value="">全部模型</option></select>
+      <div class="filter-label">状态</div>
+      <select class="filter-select" id="f-status" onchange="applyFilter()">
+        <option value="">全部</option>
+        <option value="success">成功</option>
+        <option value="failure">失败</option>
+      </select>
+      <div class="filter-label">请求ID</div>
+      <input class="filter-input" id="f-reqid" placeholder="精确匹配…" oninput="debounceFilter()">
+      <div class="filter-label">关键词搜索</div>
+      <div class="search-row">
+        <input class="filter-input" id="f-keyword" placeholder="搜索内容…" oninput="debounceFilter()">
+        <button class="regex-btn" id="regex-toggle-btn" onclick="toggleRegex()" title="正则表达式">.*</button>
+      </div>
+      <div class="filter-label">开始时间</div>
+      <input class="filter-input" id="f-start" type="datetime-local" onchange="applyFilter()">
+      <div class="filter-label">结束时间</div>
+      <input class="filter-input" id="f-end" type="datetime-local" onchange="applyFilter()">
+      <label class="annotated-toggle" style="margin-top:8px">
+        <input type="checkbox" id="f-annotated" onchange="applyFilter()"> 只看已标注 📌
+      </label>
+    </div>
+    <div class="sidebar-section">
+      <button class="sidebar-btn" onclick="resetFilters()">重置过滤</button>
+      <button class="sidebar-btn" onclick="loadHistory()">刷新日志</button>
+      <button class="sidebar-btn" onclick="confirmDeleteOld()" style="color:var(--accent-red)">删除旧日志…</button>
+    </div>
+  </div>
+
+  <div id="main">
+    <div id="charts-panel">
+      <div id="charts-inner">
+        <div class="chart-box"><h5>请求/分钟（最近1小时）</h5><canvas id="chart-timeline"></canvas></div>
+        <div class="chart-box" style="max-width:200px"><h5>模型分布</h5><canvas id="chart-models"></canvas></div>
+        <div class="chart-box"><h5>各模型平均响应时间(ms)</h5><canvas id="chart-latency"></canvas></div>
+        <div class="chart-box" style="max-width:200px"><h5>今日 vs 昨日</h5><canvas id="chart-daily"></canvas></div>
+      </div>
+    </div>
+
+    <div id="batch-bar">
+      <span class="batch-count" id="batch-count">0 条已选</span>
+      <button class="batch-btn" onclick="batchCopyIds()">复制请求IDs</button>
+      <button class="batch-btn" onclick="batchExport()">导出选中</button>
+      <button class="batch-btn danger" onclick="batchDelete()">删除选中</button>
+      <div class="spacer"></div>
+      <button class="batch-btn" onclick="clearSelection()">取消选择</button>
+    </div>
+
+    <div id="log-header">
+      <div class="col-sel"><input type="checkbox" id="sel-all" onchange="toggleSelectAll()" style="accent-color:var(--accent-blue);cursor:pointer"></div>
+      <div class="col-chain" title="链路完整性"></div>
+      <div class="col-evt" id="hdr-evt">事件</div>
+      <div class="col-model" id="hdr-model">模型</div>
+      <div class="col-req">请求ID</div>
+      <div class="col-msg">消息摘要</div>
+      <div class="col-time" id="hdr-time">时间</div>
+      <div class="col-dur" id="hdr-dur">耗时</div>
+      <div class="col-tok" id="hdr-tok">Token数</div>
+      <div class="col-gear col-gear-wrap">
+        <button class="gear-btn" onclick="toggleColPicker(event)" title="自定义列">⚙</button>
+        <div id="col-picker">
+          <div class="col-pick-item"><label><input type="checkbox" checked data-col="evt" onchange="saveColPrefs()"> 事件类型</label></div>
+          <div class="col-pick-item"><label><input type="checkbox" checked data-col="model" onchange="saveColPrefs()"> 模型</label></div>
+          <div class="col-pick-item"><label><input type="checkbox" checked data-col="time" onchange="saveColPrefs()"> 时间</label></div>
+          <div class="col-pick-item"><label><input type="checkbox" checked data-col="dur" onchange="saveColPrefs()"> 耗时</label></div>
+          <div class="col-pick-item"><label><input type="checkbox" checked data-col="tok" onchange="saveColPrefs()"> Token数</label></div>
+        </div>
+      </div>
+    </div>
+    <div id="filter-tags"></div>
+    <div id="log-list"><div class="empty-state"><div class="empty-icon">⏳</div>连接实时流中…<div class="empty-hint">等待 Cursor 发送请求…</div></div></div>
+    <div id="pagination">
+      <button class="page-btn" id="pg-prev" onclick="changePage(-1)" disabled>◀ 上页</button>
+      <span id="pg-info">—</span>
+      <button class="page-btn" id="pg-next" onclick="changePage(1)" disabled>下页 ▶</button>
+      <div class="spacer"></div>
+      <span id="log-count" style="color:var(--text-muted)"></span>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL -->
+<div id="modal-overlay" onclick="handleModalOverlayClick(event)">
+  <div id="modal">
+    <div id="modal-header">
+      <div id="modal-meta">
+        <div id="modal-title">链路详情</div>
+        <div id="modal-sub"></div>
+      </div>
+      <button id="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <div class="modal-tab-bar" id="modal-tab-bar">
+      <button class="modal-tab-btn active" data-tab="chain" onclick="switchModalTab('chain')">链路</button>
+      <button class="modal-tab-btn" data-tab="conversation" onclick="switchModalTab('conversation')">对话视图</button>
+      <button class="modal-tab-btn" data-tab="request" onclick="switchModalTab('request')">请求详情</button>
+      <button class="modal-tab-btn" data-tab="raw_req" onclick="switchModalTab('raw_req')">原始请求</button>
+      <button class="modal-tab-btn" data-tab="response" onclick="switchModalTab('response')">响应详情</button>
+      <button class="modal-tab-btn" data-tab="fulljson" onclick="switchModalTab('fulljson')">完整JSON</button>
+    </div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<!-- CONTEXT MENU -->
+<div id="ctx-menu">
+  <div class="ctx-item" onclick="ctxCopyReqId()">复制请求ID</div>
+  <div class="ctx-item" onclick="ctxCopyMsg()">复制消息内容</div>
+  <div class="ctx-item" onclick="ctxOpenNewTab()">在新标签页中查看</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" onclick="ctxFilterModel()">过滤同模型</div>
+  <div class="ctx-item" onclick="ctxFilterReqId()">过滤同请求</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" onclick="ctxAnnotate()">标注此请求 📌</div>
+  <div class="ctx-item" id="ctx-compare-item" onclick="ctxCompare()" style="display:none">对比两条请求</div>
+</div>
+
+<!-- COMPARE MODAL -->
+<div id="compare-modal">
+  <div class="compare-box">
+    <div class="compare-header">
+      <span style="font-weight:700;font-size:14px">请求对比</span>
+      <button onclick="closeCompare()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:20px">×</button>
+    </div>
+    <div class="compare-cols" id="compare-cols"></div>
+  </div>
+</div>
+
+<script>
+'use strict';
+const MAX_LIVE = 3000;
+const PAGE_SIZE = 50;
+const COLOR_POOL = [
+  'rgba(56,139,253,0.12)','rgba(63,185,80,0.12)','rgba(188,140,255,0.12)',
+  'rgba(57,211,83,0.12)','rgba(240,136,62,0.12)','rgba(248,81,73,0.12)',
+  'rgba(210,153,34,0.12)','rgba(139,148,158,0.12)','rgba(0,184,212,0.12)',
+  'rgba(255,138,101,0.12)'
+];
+const COLOR_DOT_POOL = [
+  '#388bfd','#3fb950','#bc8cff','#39d353','#f0883e',
+  '#f85149','#d29922','#8b949e','#00b8d4','#ff8a65'
+];
+
+let allLogs = [], filteredLogs = [];
+let liveMode = true, autoScroll = true, useRelTime = false, useRegex = false;
+let selectedEntry = null, modalTab = 'chain';
+let currentPage = 1, totalFromServer = 0;
+let ws = null, wsReconnTimer = null, filterTimer = null;
+let chartsOpen = false;
+let chartTimeline = null, chartModels = null, chartLatency = null, chartDaily = null;
+let wsBatch = [], wsBatchTimer = null;
+let modalChainEvents = [];
+let ctxEntry = null;
+let lastActivityTime = Date.now();
+let rpmHistory = new Array(10).fill(0);
+let pageMaxTokens = 0;
+let preloadCache = new Map();
+let preloadTimers = new Map();
+let selectedIds = new Set();
+let colPrefs = {evt:true,model:true,time:true,dur:true,tok:true};
+let lastStatsData = null;
+let tabRendered = {};
+
+// AUTH
+function authHeaders() {
+  const token = localStorage.getItem('llm_token') || '';
+  return token ? {'X-Auth-Token': token} : {};
+}
+async function apiFetch(url, opts={}) {
+  opts.headers = {...(opts.headers||{}), ...authHeaders()};
+  const res = await fetch(url, opts);
+  if (res.status === 401) { showLoginPage(); throw new Error('401'); }
+  return res;
+}
+async function checkAuth() {
+  try {
+    const res = await fetch('/auth/verify', {headers: authHeaders()});
+    const d = await res.json();
+    return d.valid;
+  } catch { return false; }
+}
+function showLoginPage() { document.getElementById('login-page').classList.add('show'); }
+function hideLoginPage() { document.getElementById('login-page').classList.remove('show'); }
+
+async function doLogin() {
+  const pw = document.getElementById('login-pw').value;
+  const errEl = document.getElementById('login-err');
+  errEl.textContent = '';
+  try {
+    const res = await fetch('/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({password: pw})});
+    if (res.ok) {
+      const d = await res.json();
+      localStorage.setItem('llm_token', d.token);
+      hideLoginPage(); initApp();
+    } else {
+      errEl.textContent = '密码错误，请重试';
+      const card = document.querySelector('.login-card');
+      card.classList.remove('shake'); void card.offsetWidth; card.classList.add('shake');
+    }
+  } catch { errEl.textContent = '连接失败，请检查服务器'; }
+}
+function doLogout() { localStorage.removeItem('llm_token'); location.reload(); }
+function toggleAccountMenu() { document.getElementById('account-menu').classList.toggle('open'); }
+document.addEventListener('click', e => { if (!e.target.closest('#account-wrap')) document.getElementById('account-menu').classList.remove('open'); });
+document.getElementById('login-pw').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
+
+function openChangePw() {
+  document.getElementById('account-menu').classList.remove('open');
+  document.getElementById('changepw-modal').classList.add('open');
+  ['cp-old','cp-new','cp-confirm'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('cp-err').textContent='';
+}
+function closeChangePw() { document.getElementById('changepw-modal').classList.remove('open'); }
+async function doChangePw() {
+  const old_pw = document.getElementById('cp-old').value;
+  const new_pw = document.getElementById('cp-new').value;
+  const conf = document.getElementById('cp-confirm').value;
+  const errEl = document.getElementById('cp-err');
+  if (new_pw !== conf) { errEl.textContent='两次输入的新密码不一致'; return; }
+  if (new_pw.length < 4) { errEl.textContent='新密码至少4位'; return; }
+  try {
+    const res = await apiFetch('/auth/change-password', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({old_password:old_pw, new_password:new_pw})});
+    if (res.ok) { localStorage.removeItem('llm_token'); alert('密码已修改，请重新登录'); location.reload(); }
+    else { const d=await res.json(); errEl.textContent=d.detail||'修改失败'; }
+  } catch(e) { if(e.message!=='401') errEl.textContent='请求失败'; }
+}
+
+// UTILS
+function escapeHtml(s) {
+  if(s==null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+}
+function fmtTime(ts) {
+  if(!ts) return '';
+  try { return useRelTime ? relativeTime(ts) : new Date(ts).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:'Asia/Shanghai'}); } catch { return ''; }
+}
+function fmtDateTime(ts) {
+  if(!ts) return '';
+  try { return useRelTime ? relativeTime(ts) : new Date(ts).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:'Asia/Shanghai'}); } catch { return ts; }
+}
+function relativeTime(ts) {
+  const diff = Date.now() - new Date(ts).getTime();
+  const sec = Math.floor(diff/1000);
+  if(sec<60) return sec+'秒前';
+  const min = Math.floor(sec/60);
+  if(min<60) return min+'分钟前';
+  const hr = Math.floor(min/60);
+  if(hr<24) return hr+'小时前';
+  return Math.floor(hr/24)+'天前';
+}
+function fmtDur(ms) { if(ms==null) return ''; return ms<1000?ms.toFixed(0)+'ms':(ms/1000).toFixed(2)+'s'; }
+function fmtNum(n) { if(n==null) return ''; if(n>=1e6) return (n/1e6).toFixed(1)+'M'; if(n>=1000) return (n/1000).toFixed(1)+'K'; return String(n); }
+function durClass(ms) { if(ms==null) return ''; return ms<1000?'dur-fast':ms<5000?'dur-medium':'dur-slow'; }
+function evtColor(et) { return {raw_request:'#bc8cff',pre_call:'#388bfd',post_call:'#39d353',success:'#3fb950',failure:'#f85149',chunk:'#f0883e'}[et]||'#8b949e'; }
+function evtLabel(et) { return {raw_request:'原始请求',pre_call:'预处理',post_call:'后处理',success:'成功',failure:'失败',chunk:'流式片段'}[et]||et; }
+function reqIdColorIdx(reqId) { if(!reqId) return null; let h=0; for(let c of reqId) h+=c.charCodeAt(0); return h%10; }
+function hlText(str, kw) {
+  if(!kw||!str) return escapeHtml(str||'');
+  const escaped = escapeHtml(str);
+  try {
+    const pattern = useRegex ? kw : kw.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    return escaped.replace(new RegExp(escapeHtml(pattern),'gi'), m => `<span class="hl">${m}</span>`);
+  } catch { return escaped; }
+}
+function msgPreview(entry) {
+  const kw = document.getElementById('f-keyword').value.trim();
+  if(entry.event_type==='success'&&entry.chunk_data) return kw?hlText(String(entry.chunk_data).slice(0,100),kw):escapeHtml(String(entry.chunk_data).slice(0,100));
+  if(entry.event_type==='raw_request'||entry.event_type==='pre_call') {
+    if(entry.request_body) {
+      const msgs=entry.request_body.messages;
+      if(Array.isArray(msgs)&&msgs.length>0) {
+        const last=msgs[msgs.length-1]; let c=last.content||'';
+        if(Array.isArray(c)){const t=c.find(x=>x.type==='text');c=t?t.text:'';}
+        return kw?hlText(String(c).slice(0,150),kw):escapeHtml(String(c).slice(0,150));
+      }
+    }
+  }
+  if(entry.chunk_data) return kw?hlText(String(entry.chunk_data).slice(0,120),kw):escapeHtml(String(entry.chunk_data).slice(0,120));
+  if(entry.error) return '<span style="color:var(--accent-red)">'+escapeHtml(String(entry.error).slice(0,120))+'</span>';
+  return '';
+}
+function chainCompleteness(entry) {
+  if(!entry.request_id) return 'none';
+  const events=allLogs.filter(e=>e.request_id===entry.request_id).map(e=>e.event_type);
+  if(events.includes('failure')) return 'failed';
+  if(events.includes('success')&&events.includes('raw_request')) return 'complete';
+  if(events.includes('success')||events.includes('raw_request')||events.includes('pre_call')) return 'partial';
+  return 'none';
+}
+function syntaxHL(obj) {
+  const str=typeof obj==='string'?obj:JSON.stringify(obj,null,2);
+  return str.replace(/(\"(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*\"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, m => {
+    if(/^"/.test(m)) return /:$/.test(m)?'<span class="jk">'+escapeHtml(m)+'</span>':'<span class="js">'+escapeHtml(m)+'</span>';
+    if(/true|false/.test(m)) return '<span class="jb">'+m+'</span>';
+    if(/null/.test(m)) return '<span class="jnull">'+m+'</span>';
+    return '<span class="jn">'+m+'</span>';
+  });
+}
+window._fullJsonStore={};
+function jsonBlock(obj, id) {
+  if(obj==null) return '<div style="color:var(--text-muted);font-style:italic;padding:8px">无数据</div>';
+  const str=typeof obj==='string'?obj:JSON.stringify(obj,null,2);
+  const truncated=str.length>50000;
+  const display=truncated?str.slice(0,50000):str;
+  window._fullJsonStore[id]=str;
+  return `<div class="json-wrap"><button class="json-copy" onclick="copyText('jblk-${id}')">复制</button><pre class="json-code" id="jblk-${id}">${syntaxHL(display)}</pre>${truncated?`<div style="padding:8px;text-align:center"><button class="page-btn" onclick="expandJsonFull('jblk-${id}','${id}')">加载完整内容 (${fmtNum(str.length)} chars)</button></div>`:''}</div>`;
+}
+window.expandJsonFull=(elId,storeKey)=>{ const el=document.getElementById(elId); if(el&&window._fullJsonStore[storeKey]) el.innerHTML=syntaxHL(window._fullJsonStore[storeKey]); };
+window.copyText=id=>{ const el=document.getElementById(id); if(el) navigator.clipboard.writeText(el.innerText).catch(()=>{}); };
+function copyStr(s) { navigator.clipboard.writeText(s).catch(()=>{}); }
+
+// MARKDOWN
+function setupMarked() {
+  if(typeof marked==='undefined') return;
+  marked.setOptions({breaks:true,gfm:true});
+  const renderer=new marked.Renderer();
+  renderer.code=(code,lang)=>{
+    let highlighted=code;
+    if(typeof hljs!=='undefined'&&lang){try{highlighted=hljs.highlight(code,{language:lang}).value;}catch{}}
+    else if(typeof hljs!=='undefined'){try{highlighted=hljs.highlightAuto(code).value;}catch{}}
+    const uid='cb_'+(Math.random().toString(36).slice(2));
+    return `<div class="code-block-wrap"><button class="code-copy-btn" onclick="copyCodeBlock('${uid}')">复制</button><pre><code id="${uid}">${highlighted}</code></pre></div>`;
+  };
+  marked.use({renderer});
+}
+window.copyCodeBlock=id=>{ const el=document.getElementById(id); if(el) navigator.clipboard.writeText(el.innerText).catch(()=>{}); };
+function renderMarkdown(text) {
+  if(typeof marked==='undefined') return '<pre>'+escapeHtml(text)+'</pre>';
+  try { return marked.parse(text); } catch { return '<pre>'+escapeHtml(text)+'</pre>'; }
+}
+function processThinkTags(text) {
+  const parts=[];
+  const re=/<think>([\s\S]*?)<\/think>/gi;
+  let lastIdx=0, match;
+  while((match=re.exec(text))!==null) {
+    if(match.index>lastIdx) parts.push({type:'text',content:text.slice(lastIdx,match.index)});
+    parts.push({type:'think',content:match[1]});
+    lastIdx=match.index+match[0].length;
+  }
+  if(lastIdx<text.length) parts.push({type:'text',content:text.slice(lastIdx)});
+  return parts;
+}
+function renderResponseContent(text) {
+  const parts=processThinkTags(text);
+  let html='';
+  for(const part of parts) {
+    if(part.type==='think') {
+      html+=`<div class="think-block"><div class="think-header" onclick="this.parentElement.classList.toggle('open')"><span class="think-arrow">▶</span><span>思维链</span><span style="margin-left:auto;font-size:10px">${part.content.length} 字符</span></div><div class="think-content rendered-view">${renderMarkdown(part.content)}</div></div>`;
+    } else if(part.content.trim()) {
+      html+=`<div class="rendered-view">${renderMarkdown(part.content)}</div>`;
+    }
+  }
+  return html;
+}
+
+// WS
+function connectWS() {
+  const url=(location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws';
+  setWS('connecting');
+  ws=new WebSocket(url);
+  ws.onopen=()=>setWS('connected');
+  ws.onmessage=e=>{
+    try {
+      const d=JSON.parse(e.data);
+      if(d.type==='ping') return;
+      wsBatch.push(d);
+      if(!wsBatchTimer) wsBatchTimer=setTimeout(()=>{const batch=wsBatch.splice(0);wsBatchTimer=null;batch.forEach(pushLive);},100);
+    } catch {}
+  };
+  ws.onclose=()=>{setWS('disconnected');wsReconnTimer=setTimeout(connectWS,3000);};
+  ws.onerror=()=>ws.close();
+}
+function setWS(s) {
+  const dot=document.getElementById('ws-dot');
+  dot.className=s==='connected'?'connected':s==='connecting'?'connecting':'';
+  document.getElementById('ws-label').textContent=s==='connected'?'已连接':s==='connecting'?'连接中…':'已断线';
+}
+function pushLive(entry) {
+  lastActivityTime=Date.now();
+  document.getElementById('idle-notice').style.display='none';
+  allLogs.unshift(entry); if(allLogs.length>MAX_LIVE) allLogs.pop();
+  if(!liveMode) return;
+  if(!matchFilter(entry)) return;
+  filteredLogs.unshift(entry); if(filteredLogs.length>MAX_LIVE) filteredLogs.pop();
+  prependRow(entry);
+}
+
+// ROW BUILD
+function buildRowHtml(entry) {
+  const tokens=(entry.input_tokens||0)+(entry.output_tokens||0);
+  const tokPct=pageMaxTokens>0?Math.round((tokens/pageMaxTokens)*100):0;
+  const chainDot=chainCompleteness(entry);
+  const cidx=reqIdColorIdx(entry.request_id);
+  const dotColor=cidx!==null?COLOR_DOT_POOL[cidx]:'transparent';
+  const notePin=entry.has_note?'<span class="note-pin">📌</span>':'';
+  const checked=selectedIds.has(entry.id||'')?'checked':'';
+  let reqIdHtml='';
+  if(entry.request_id) {
+    const rid=entry.request_id;
+    const short=rid.slice(0,8)+'…'+rid.slice(-4);
+    reqIdHtml=`<div class="req-dot" style="background:${dotColor}"></div><span class="req-id-text" title="${escapeHtml(rid)}">${escapeHtml(short)}</span>`;
+  }
+  const evtH=colPrefs.evt?'':'style="display:none"';
+  const mdlH=colPrefs.model?'':'style="display:none"';
+  const timH=colPrefs.time?'':'style="display:none"';
+  const durH=colPrefs.dur?'':'style="display:none"';
+  const tokH=colPrefs.tok?'':'style="display:none"';
+  return `<div class="row-cb"><input type="checkbox" ${checked} onclick="toggleSelectCb(event,'${escapeHtml(entry.id||'')}')"></div>
+    <div class="chain-dot-indicator ${chainDot}"></div>
+    <div class="col-evt" ${evtH}><span class="evt-badge evt-${escapeHtml(entry.event_type)}">${escapeHtml(evtLabel(entry.event_type))}</span>${(()=>{const rb=entry.request_body;const isStream=rb&&rb.stream===true||(entry.event_type==='chunk');if(isStream)return '<span class="stream-badge stream">⚡流式</span>';if(rb&&rb.stream===false)return '<span class="stream-badge sync">⬜同步</span>';return '';})()}</div>
+    <div class="col-model-cell" ${mdlH} title="${escapeHtml(entry.model||'')}">${escapeHtml(entry.model||'—')}</div>
+    <div class="col-req-cell">${reqIdHtml}${notePin}</div>
+    <div class="col-msg-cell">${msgPreview(entry)}</div>
+    <div class="col-time-cell" ${timH}>${fmtTime(entry.timestamp)}</div>
+    <div class="col-dur-cell ${durClass(entry.duration_ms)}" ${durH}>${fmtDur(entry.duration_ms)}</div>
+    <div class="col-tok-cell" ${tokH}>${tokens>0?`<span class="tok-num">${fmtNum(tokens)}</span><div class="tok-bar-wrap"><div class="tok-bar" style="width:${tokPct}%"></div></div>`:''}</div>`;
+}
+function getRowBg(entry) { return 'transparent'; }
+
+function prependRow(entry) {
+  const list=document.getElementById('log-list');
+  const empty=list.querySelector('.empty-state'); if(empty) empty.remove();
+  const div=document.createElement('div');
+  div.className='log-row new-entry';
+  div.dataset.id=entry.id||'';
+  div.style.backgroundColor=getRowBg(entry);
+  if(selectedIds.has(entry.id||'')) div.classList.add('checked');
+  div.innerHTML=buildRowHtml(entry);
+  wireRow(div,entry);
+  list.prepend(div);
+  const rows=list.querySelectorAll('.log-row');
+  if(rows.length>PAGE_SIZE*2) rows[rows.length-1].remove();
+  if(autoScroll) list.scrollTop=0;
+  document.getElementById('log-count').textContent=filteredLogs.length.toLocaleString()+' 条';
+}
+function wireRow(div, entry) {
+  div.addEventListener('mouseenter', ()=>startPreload(entry.request_id));
+  div.addEventListener('mouseleave', ()=>cancelPreload(entry.request_id));
+  div.addEventListener('click', e=>{
+    if(e.target.closest('.col-req-cell')||e.target.closest('.row-cb')) return;
+    selectEntry(entry);
+  });
+  const reqCell=div.querySelector('.col-req-cell');
+  if(reqCell&&entry.request_id) {
+    reqCell.addEventListener('click', ev=>{
+      ev.stopPropagation();
+      document.getElementById('f-reqid').value=entry.request_id;
+      applyFilter();
+    });
+  }
+  div.addEventListener('click', e=>{
+    if(e.target.closest('.col-req-cell')||e.target.closest('.row-cb')) return;
+    if(e.ctrlKey||e.metaKey){toggleSelectCb(e,entry.id||'');return;}
+    if(e.shiftKey){rangeSelect(entry);return;}
+  });
+  div.addEventListener('contextmenu', ev=>{ev.preventDefault();showContextMenu(ev,entry);});
+}
+
+// PRELOAD
+function startPreload(reqId) {
+  if(!reqId||preloadCache.has(reqId)) return;
+  const t=setTimeout(async()=>{
+    preloadTimers.delete(reqId);
+    if(preloadCache.has(reqId)) return;
+    try { const res=await apiFetch('/logs/'+encodeURIComponent(reqId)); if(res.ok){const d=await res.json();preloadCache.set(reqId,d.events);} } catch {}
+  },300);
+  preloadTimers.set(reqId,t);
+}
+function cancelPreload(reqId) { if(preloadTimers.has(reqId)){clearTimeout(preloadTimers.get(reqId));preloadTimers.delete(reqId);} }
+
+// MULTI-SELECT
+function toggleSelectCb(e, id) {
+  e.stopPropagation();
+  if(selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id);
+  const row=document.querySelector(`.log-row[data-id="${CSS.escape(id)}"]`);
+  if(row){row.classList.toggle('checked',selectedIds.has(id));const cb=row.querySelector('input[type=checkbox]');if(cb)cb.checked=selectedIds.has(id);}
+  updateBatchBar();
+}
+let lastSelectedIdx=-1;
+function rangeSelect(entry) {
+  const rows=Array.from(document.querySelectorAll('.log-row'));
+  const curIdx=rows.findIndex(r=>r.dataset.id===entry.id);
+  if(lastSelectedIdx<0||curIdx<0) return;
+  const [a,b]=[Math.min(lastSelectedIdx,curIdx),Math.max(lastSelectedIdx,curIdx)];
+  rows.slice(a,b+1).forEach(r=>{selectedIds.add(r.dataset.id);r.classList.add('checked');const cb=r.querySelector('input[type=checkbox]');if(cb)cb.checked=true;});
+  updateBatchBar();
+}
+function toggleSelectAll() {
+  const all=document.getElementById('sel-all').checked;
+  document.querySelectorAll('.log-row').forEach(r=>{if(all){selectedIds.add(r.dataset.id);r.classList.add('checked');}else{selectedIds.delete(r.dataset.id);r.classList.remove('checked');}const cb=r.querySelector('input[type=checkbox]');if(cb)cb.checked=all;});
+  updateBatchBar();
+}
+function clearSelection() { selectedIds.clear(); document.querySelectorAll('.log-row').forEach(r=>{r.classList.remove('checked');const cb=r.querySelector('input[type=checkbox]');if(cb)cb.checked=false;}); document.getElementById('sel-all').checked=false; updateBatchBar(); }
+function updateBatchBar() {
+  const n=selectedIds.size;
+  document.getElementById('batch-count').textContent=n+' 条已选';
+  document.getElementById('batch-bar').classList.toggle('show',n>0);
+}
+function batchCopyIds(){copyStr([...selectedIds].join('\n'));}
+function batchExport(){const data=allLogs.filter(e=>selectedIds.has(e.id||''));const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='llm-selected-'+Date.now()+'.json';a.click();}
+function batchDelete(){alert('批量删除暂未实现');}
+
+// FILTER
+function getCheckedEvents(){return Array.from(document.querySelectorAll('#evt-checks input:checked')).map(cb=>cb.value);}
+function toggleRegex(){useRegex=!useRegex;document.getElementById('regex-toggle-btn').classList.toggle('active',useRegex);applyFilter();}
+function matchFilter(e) {
+  const evts=getCheckedEvents(); if(evts.length>0&&!evts.includes(e.event_type)) return false;
+  const model=document.getElementById('f-model').value; if(model&&e.model!==model) return false;
+  const status=document.getElementById('f-status').value;
+  if(status==='success'&&e.event_type!=='success') return false;
+  if(status==='failure'&&e.event_type!=='failure') return false;
+  const reqid=document.getElementById('f-reqid').value.trim(); if(reqid&&e.request_id!==reqid) return false;
+  const kw=document.getElementById('f-keyword').value.trim();
+  if(kw){try{const hay=JSON.stringify(e);if(useRegex){if(!new RegExp(kw,'i').test(hay))return false;}else{if(!hay.toLowerCase().includes(kw.toLowerCase()))return false;}}catch{return false;}}
+  const start=document.getElementById('f-start').value; if(start&&(e.timestamp||'')<new Date(start).toISOString()) return false;
+  const end=document.getElementById('f-end').value; if(end&&(e.timestamp||'')>new Date(end).toISOString()) return false;
+  return true;
+}
+function applyFilter(){updateFilterTags();if(liveMode){filteredLogs=allLogs.filter(matchFilter);currentPage=1;renderList();}else{currentPage=1;loadHistory();}}
+function debounceFilter(){clearTimeout(filterTimer);filterTimer=setTimeout(applyFilter,300);}
+function resetFilters(){document.querySelectorAll('#evt-checks input').forEach(cb=>cb.checked=false);['f-model','f-status','f-reqid','f-keyword','f-start','f-end'].forEach(id=>document.getElementById(id).value='');document.getElementById('f-annotated').checked=false;applyFilter();}
+function updateFilterTags(){
+  const tags=[];
+  const evts=getCheckedEvents();if(evts.length)tags.push({l:'类型:'+evts.map(evtLabel).join(','),c:()=>{document.querySelectorAll('#evt-checks input').forEach(cb=>cb.checked=false);applyFilter();}});
+  const model=document.getElementById('f-model').value;if(model)tags.push({l:'模型:'+model,c:()=>{document.getElementById('f-model').value='';applyFilter();}});
+  const status=document.getElementById('f-status').value;if(status)tags.push({l:'状态:'+(status==='success'?'成功':'失败'),c:()=>{document.getElementById('f-status').value='';applyFilter();}});
+  const reqid=document.getElementById('f-reqid').value.trim();if(reqid)tags.push({l:'请求ID:'+reqid.slice(0,12),c:()=>{document.getElementById('f-reqid').value='';applyFilter();}});
+  const kw=document.getElementById('f-keyword').value.trim();if(kw)tags.push({l:(useRegex?'正则:':'关键词:')+kw.slice(0,20),c:()=>{document.getElementById('f-keyword').value='';applyFilter();}});
+  if(document.getElementById('f-annotated').checked)tags.push({l:'只看已标注',c:()=>{document.getElementById('f-annotated').checked=false;applyFilter();}});
+  window._tagClears=tags.map(t=>t.c);
+  document.getElementById('filter-tags').innerHTML=tags.map((t,i)=>`<div class="filter-tag">${escapeHtml(t.l)} <span class="rm" onclick="window._tagClears[${i}]()">×</span></div>`).join('');
+}
+
+// RENDER
+function renderList(){
+  const list=document.getElementById('log-list');
+  const start=(currentPage-1)*PAGE_SIZE,end=start+PAGE_SIZE;
+  const page=liveMode?filteredLogs.slice(start,end):filteredLogs;
+  const total=liveMode?filteredLogs.length:totalFromServer;
+  pageMaxTokens=Math.max(...page.map(e=>(e.input_tokens||0)+(e.output_tokens||0)).filter(t=>t>0),1);
+  if(!page.length){
+    list.innerHTML='<div class="empty-state"><div class="empty-icon">🔍</div>没有匹配当前过滤条件的日志。<div class="empty-hint"><button class="page-btn" onclick="resetFilters()" style="margin-top:8px">重置过滤</button></div></div>';
+    updatePagination(total);document.getElementById('log-count').textContent='';return;
+  }
+  list.innerHTML=page.map(entry=>`<div class="log-row${selectedIds.has(entry.id||'')?' checked':''}" data-id="${escapeHtml(entry.id||'')}" style="background-color:${getRowBg(entry)}">${buildRowHtml(entry)}</div>`).join('');
+  window._logMap={};page.forEach(e=>{window._logMap[e.id||'']=e;});
+  list.querySelectorAll('.log-row').forEach((div,i)=>{const entry=page[i];if(!entry)return;wireRow(div,entry);});
+  updatePagination(total);document.getElementById('log-count').textContent=total.toLocaleString()+' 条';
+  if(selectedEntry){const el=list.querySelector(`[data-id="${CSS.escape(selectedEntry.id||'')}"]`);if(el)el.classList.add('selected');}
+}
+function updatePagination(total){const pages=Math.max(1,Math.ceil(total/PAGE_SIZE));document.getElementById('pg-info').textContent=`第 ${currentPage} / ${pages} 页`;document.getElementById('pg-prev').disabled=currentPage<=1;document.getElementById('pg-next').disabled=currentPage>=pages;}
+function changePage(d){currentPage+=d;liveMode?renderList():loadHistory();}
+
+// SELECTION / MODAL OPEN
+function selectEntry(entry){
+  if(!entry)return;
+  selectedEntry=entry;
+  document.querySelectorAll('.log-row').forEach(r=>r.classList.remove('selected'));
+  const el=document.querySelector(`.log-row[data-id="${CSS.escape(entry.id||'')}"]`);if(el)el.classList.add('selected');
+  openModalForReqId(entry.request_id,entry);
+}
+function openModalForReqId(requestId,fallbackEntry){
+  document.getElementById('modal-overlay').classList.add('open');
+  tabRendered={};
+  if(requestId){
+    document.getElementById('modal-title').textContent='链路详情 — '+requestId.slice(0,20)+'…';
+    loadChainAndShowModal(requestId,fallbackEntry);
+  } else if(fallbackEntry){
+    document.getElementById('modal-title').textContent=(evtLabel(fallbackEntry.event_type)||'')+' — '+(fallbackEntry.model||'');
+    modalChainEvents=[fallbackEntry];updateModalSub(fallbackEntry);switchModalTab('chain');
+  }
+}
+function closeModal(){document.getElementById('modal-overlay').classList.remove('open');selectedEntry=null;tabRendered={};document.querySelectorAll('.log-row').forEach(r=>r.classList.remove('selected'));}
+function handleModalOverlayClick(e){if(e.target===document.getElementById('modal-overlay'))closeModal();}
+
+async function loadChainAndShowModal(requestId,fallbackEntry){
+  const _mb=document.getElementById('modal-body');
+  _mb.innerHTML=['chain','conversation','request','raw_req','response','fulljson'].map(t=>'<div id="modal-tab-'+t+'" style="display:'+(t==='chain'?'block':'none')+'"></div>').join('');
+  tabRendered={};
+  document.getElementById('modal-tab-chain').innerHTML='<div style="padding:10px"><div class="skeleton skel-line w60" style="margin-bottom:12px"></div><div class="skeleton skel-line w40" style="margin-bottom:12px"></div><div class="skeleton skel-box" style="margin-bottom:12px"></div></div>';
+  let events=[];
+  if(preloadCache.has(requestId)){events=preloadCache.get(requestId);}
+  else{
+    try{const res=await apiFetch('/logs/'+encodeURIComponent(requestId));if(res.ok){const d=await res.json();events=d.events;preloadCache.set(requestId,events);}}catch{}
+  }
+  if(!events.length) events=allLogs.filter(e=>e.request_id===requestId).sort((a,b)=>(a.timestamp||'').localeCompare(b.timestamp||''));
+  if(!events.length&&fallbackEntry) events=[fallbackEntry];
+  modalChainEvents=events;
+  const successEvt=events.find(e=>e.event_type==='success');
+  const ref=successEvt||events[0];if(ref)updateModalSub(ref);
+  switchModalTab(modalTab);
+}
+function updateModalSub(entry){
+  const parts=[];
+  if(entry.model)parts.push(`<span>模型: <strong>${escapeHtml(entry.model)}</strong></span>`);
+  if(entry.timestamp)parts.push(`<span>时间: ${fmtDateTime(entry.timestamp)}</span>`);
+  if(entry.duration_ms!=null)parts.push(`<span>耗时: <strong class="${durClass(entry.duration_ms)}">${fmtDur(entry.duration_ms)}</strong></span>`);
+  if(entry.input_tokens||entry.output_tokens)parts.push(`<span>Token: ${fmtNum(entry.input_tokens||0)} 输入 / ${fmtNum(entry.output_tokens||0)} 输出</span>`);
+  document.getElementById('modal-sub').innerHTML=parts.join('');
+}
+function switchModalTab(tab){
+  modalTab=tab;
+  document.querySelectorAll('.modal-tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
+  ['chain','conversation','request','raw_req','response','fulljson'].forEach(t=>{
+    const el=document.getElementById('modal-tab-'+t);
+    if(el) el.style.display=(t===tab)?'':'none';
+  });
+  if(tabRendered[tab]) return;
+  tabRendered[tab]=true;
+  const events=modalChainEvents;
+  const body=document.getElementById('modal-tab-'+tab);
+  if(!body) return;
+  switch(tab){
+    case 'chain': renderModalChain(events,body);break;
+    case 'conversation': renderModalConversation(events,body);break;
+    case 'request': renderModalRequest(events,body);break;
+    case 'raw_req': renderModalRawReq(events,body);break;
+    case 'response': renderModalResponse(events,body);break;
+    case 'fulljson': renderModalFullJson(events,body);break;
+  }
+}
+
+function renderModalChain(events,body){
+  if(!events.length){body.innerHTML='<div class="empty-state">无事件数据</div>';return;}
+  const sorted=[...events].sort((a,b)=>(a.timestamp||'').localeCompare(b.timestamp||''));
+  const times=sorted.map(e=>e.timestamp?new Date(e.timestamp).getTime():0).filter(t=>t>0);
+  const minT=times.length?Math.min(...times):0;
+  const maxT=times.length?Math.max(...times):minT+1;
+  const span=maxT-minT||1;
+  let gantt=`<div class="gantt-wrap"><h4>时间轴</h4>`;
+  for(const ev of sorted){
+    const color=evtColor(ev.event_type);
+    const evT=ev.timestamp?new Date(ev.timestamp).getTime():minT;
+    const offsetPct=Math.max(0,Math.min(90,((evT-minT)/span)*90));
+    const durMs=ev.duration_ms||0;
+    const durPct=Math.max(2,Math.min(100-offsetPct,(durMs/span)*90));
+    gantt+=`<div class="gantt-row"><div class="gantt-label" style="color:${color}">${escapeHtml(evtLabel(ev.event_type))}</div><div class="gantt-track"><div class="gantt-segment" style="left:${offsetPct.toFixed(1)}%;width:${durPct.toFixed(1)}%;background:${color}40;color:${color}">${durMs>0?fmtDur(durMs):''}</div></div><div class="gantt-dur">${ev.duration_ms!=null?fmtDur(ev.duration_ms):''}</div><div class="gantt-time">${fmtTime(ev.timestamp)}</div></div>`;
+  }
+  gantt+='</div>';
+  const successEvt=events.find(e=>e.event_type==='success');
+  let tokenHtml='';
+  if(successEvt&&(successEvt.input_tokens||successEvt.output_tokens)){
+    const inp=successEvt.input_tokens||0,outp=successEvt.output_tokens||0,tot=inp+outp;
+    const inpPct=tot>0?Math.round(inp/tot*100):50;
+    tokenHtml=`<div style="margin-bottom:16px"><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px">Token 用量</div><div class="token-viz"><div class="token-box"><div class="tv-val" style="color:var(--accent-blue)">${fmtNum(inp)}</div><div class="tv-lbl">输入</div></div><div class="token-box"><div class="tv-val" style="color:var(--accent-green)">${fmtNum(outp)}</div><div class="tv-lbl">输出</div></div><div class="token-box"><div class="tv-val" style="color:var(--accent-purple)">${fmtNum(tot)}</div><div class="tv-lbl">总计</div></div></div><div class="token-split" style="margin-top:8px"><div class="inp" style="width:${inpPct}%"></div><div class="outp" style="width:${100-inpPct}%"></div></div></div>`;
+  }
+  let stages='';
+  for(const ev of sorted){
+    const color=evtColor(ev.event_type);
+    stages+=`<div class="chain-stage"><div class="chain-dot" style="background:${color}20;color:${color}">${evtLabel(ev.event_type)[0]}</div><div class="chain-content"><div class="chain-type" style="color:${color}">${escapeHtml(evtLabel(ev.event_type))}</div><div class="chain-meta">${fmtDateTime(ev.timestamp)}${ev.duration_ms!=null?' · '+fmtDur(ev.duration_ms):''}</div>${ev.error?`<div style="margin-top:4px;color:var(--accent-red);font-size:11px;white-space:pre-wrap">${escapeHtml(String(ev.error).slice(0,300))}</div>`:''}</div></div>`;
+  }
+  body.innerHTML=gantt+tokenHtml+`<div style="margin-top:4px">${stages}</div>`;
+}
+
+window._msgContents={};
+function buildMsgCard(msg){
+  let content=msg.content||'';
+  if(Array.isArray(content)) content=content.map(p=>p.type==='text'?p.text||'':p.type==='image_url'?'[图片]':JSON.stringify(p)).join('\n');
+  else content=String(content);
+  // 超长内容截断，>2000字符只渲染前2000，后面懒展开
+  const role=msg.role||'user';
+  const isSystem=role==='system';
+  const TRUNCATE_LEN=isSystem?300:2000;
+  const truncate=content.length>TRUNCATE_LEN;
+  const renderContent=truncate?content.slice(0,TRUNCATE_LEN):content;
+  const uid='ms_'+(Math.random().toString(36).slice(2));
+  const copyId='mc_'+(Math.random().toString(36).slice(2));
+  window._msgContents[copyId]=content;
+  const renderedBody=renderMarkdown(renderContent);
+  return `<div class="msg-card ${escapeHtml(role)}"><button class="msg-copy-btn" onclick="copyStr(window._msgContents['${copyId}'])">复制</button><div class="msg-role-label ${escapeHtml(role)}">● ${escapeHtml(role)}</div><div class="msg-body rendered-view" id="${uid}">${renderedBody}</div>${truncate?`<div class="msg-expand" onclick="window._msgContents['${copyId}']&&(document.getElementById('${uid}').innerHTML=renderMarkdown(window._msgContents['${copyId}']),this.style.display='none')">展开全文（${content.length}字符）▾</div>`:''}</div>`;
+}
+function renderMessagesAsync(msgs, container, statsHtml){
+  container.innerHTML=statsHtml+'<div id="msg-list-wrap"></div><div id="msg-load-more" style="text-align:center;padding:8px;color:var(--text-muted);font-size:12px"></div>';
+  const wrap=container.querySelector('#msg-list-wrap');
+  const more=container.querySelector('#msg-load-more');
+  const BATCH=8;
+  let idx=0;
+  function renderBatch(){
+    const end=Math.min(idx+BATCH,msgs.length);
+    const frag=document.createDocumentFragment();
+    for(let i=idx;i<end;i++){
+      const div=document.createElement('div');
+      div.innerHTML=buildMsgCard(msgs[i]);
+      frag.appendChild(div.firstChild);
+    }
+    wrap.appendChild(frag);
+    idx=end;
+    if(idx<msgs.length){
+      more.textContent=`已加载 ${idx}/${msgs.length} 条，加载中...`;
+      requestAnimationFrame(renderBatch);
+    } else {
+      more.style.display='none';
+    }
+  }
+  requestAnimationFrame(renderBatch);
+}
+function renderMessagesHtml(msgs){
+  if(!Array.isArray(msgs)||!msgs.length) return '<div class="empty-state">无消息数据</div>';
+  const uCnt=msgs.filter(m=>m.role==='user').length;
+  const aCnt=msgs.filter(m=>m.role==='assistant').length;
+  const sCnt=msgs.filter(m=>m.role==='system').length;
+  return `<div class="msg-stats"><span>共 ${msgs.length} 条</span><span style="color:var(--accent-blue)">用户 ${uCnt}</span><span style="color:var(--accent-green)">助手 ${aCnt}</span>${sCnt?`<span style="color:var(--accent-yellow)">系统 ${sCnt}</span>`:''}</div>`;
+}
+function renderModalRequest(events,body){
+  const ev=events.find(e=>e.event_type==='raw_request')||events.find(e=>e.event_type==='pre_call')||events[0];
+  if(!ev){body.innerHTML='<div class="empty-state">无请求数据</div>';return;}
+  const msgs=ev.request_body&&ev.request_body.messages;
+  if(!Array.isArray(msgs)||!msgs.length){body.innerHTML='<div class="empty-state">无消息数据</div>';return;}
+  renderMessagesAsync(msgs,body,renderMessagesHtml(msgs));
+}
+function renderModalRawReq(events,body){
+  const ev=events.find(e=>e.event_type==='raw_request')||events.find(e=>e.event_type==='pre_call')||events[0];
+  if(!ev){body.innerHTML='<div class="empty-state">无原始请求数据</div>';return;}
+  // 原始请求：直接显示完整 JSON，不做格式化
+  body.innerHTML=jsonBlock(ev.request_body||ev,'raw_req_json');
+}
+function renderModalConversation(events,body){
+  const ev=events.find(e=>e.event_type==='raw_request')||events.find(e=>e.event_type==='pre_call')||events[0];
+  const msgs=ev&&ev.request_body&&ev.request_body.messages;
+  if(!Array.isArray(msgs)||!msgs.length){body.innerHTML='<div class="empty-state">无消息数据</div>';return;}
+  let h='<div class="chat-wrap">';
+  for(const msg of msgs){
+    let content=msg.content||'';
+    if(Array.isArray(content)) content=content.map(p=>p.type==='text'?p.text:'[图片]').join('\n');
+    else content=String(content);
+    const role=msg.role||'user';
+    if(role==='system'){h+=`<div class="bubble-row system"><div class="bubble system">[系统提示] ${escapeHtml(content.slice(0,120))}${content.length>120?'…':''}</div></div>`;}
+    else{const rendered=role==='assistant'?`<div class="rendered-view">${renderMarkdown(content)}</div>`:escapeHtml(content).replace(/\n/g,'<br>');h+=`<div class="bubble-row ${role}"><div class="bubble ${role}">${rendered}</div></div>`;}
+  }
+  const successEvt=events.find(e=>e.event_type==='success');
+  if(successEvt){
+    let respText='';
+    if(successEvt.response_body&&successEvt.response_body.choices&&successEvt.response_body.choices[0]) respText=(successEvt.response_body.choices[0].message&&successEvt.response_body.choices[0].message.content)||'';
+    else if(successEvt.chunk_data) respText=successEvt.chunk_data;
+    if(respText) h+=`<div class="bubble-row assistant"><div class="bubble assistant"><div class="rendered-view">${renderMarkdown(respText)}</div></div></div>`;
+  }
+  h+='</div>';body.innerHTML=h;
+}
+function renderModalResponse(events,body){
+  const ev=events.find(e=>e.event_type==='success')||events.find(e=>e.event_type==='post_call')||events[0];
+  if(!ev){body.innerHTML='<div class="empty-state">无响应数据</div>';return;}
+  let contentText='';
+  if(ev.response_body&&ev.response_body.choices&&ev.response_body.choices[0]) contentText=(ev.response_body.choices[0].message&&ev.response_body.choices[0].message.content)||'';
+  if(!contentText&&ev.chunk_data) contentText=ev.chunk_data;
+  const uid='rv_'+(Math.random().toString(36).slice(2));
+  let h=`<div class="view-toggle"><button class="view-toggle-btn active" id="vt-r-${uid}" onclick="switchRespView('${uid}','render')">渲染视图</button><button class="view-toggle-btn" id="vt-j-${uid}" onclick="switchRespView('${uid}','raw')">原始JSON</button></div>`;
+  h+=`<div id="vv-r-${uid}">`;
+  if(contentText) h+=renderResponseContent(contentText);
+  else h+='<div style="color:var(--text-muted);padding:8px;font-style:italic">无文本内容</div>';
+  h+='</div>';
+  h+=`<div id="vv-j-${uid}" style="display:none">`;
+  if(ev.input_tokens||ev.output_tokens) h+=`<div style="margin-bottom:12px"><div class="token-viz"><div class="token-box"><div class="tv-val" style="color:var(--accent-blue)">${fmtNum(ev.input_tokens||0)}</div><div class="tv-lbl">输入</div></div><div class="token-box"><div class="tv-val" style="color:var(--accent-green)">${fmtNum(ev.output_tokens||0)}</div><div class="tv-lbl">输出</div></div></div></div>`;
+  h+=jsonBlock(ev.response_body,'res_'+uid);
+  h+='</div>';
+  body.innerHTML=h;
+}
+window.switchRespView=(uid,view)=>{
+  document.getElementById('vv-r-'+uid).style.display=view==='render'?'':'none';
+  document.getElementById('vv-j-'+uid).style.display=view==='raw'?'':'none';
+  document.getElementById('vt-r-'+uid).classList.toggle('active',view==='render');
+  document.getElementById('vt-j-'+uid).classList.toggle('active',view==='raw');
+};
+function renderModalFullJson(events,body){
+  const obj=events.length===1?events[0]:events;
+  body.innerHTML=`<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">完整 JSON（共 ${events.length} 个事件）</div>`+jsonBlock(obj,'fulljson');
+}
+
+// STATS
+async function refreshStats(){
+  try{
+    const s=await apiFetch('/stats?hours=24').then(r=>r.json());
+    lastStatsData=s;
+    document.getElementById('st-total').textContent=fmtNum(s.total_requests);
+    document.getElementById('st-rate').textContent=s.success_rate+'%';
+    document.getElementById('st-fail').textContent=fmtNum(s.failure_count);
+    document.getElementById('st-lat').textContent=s.avg_duration_ms?fmtDur(s.avg_duration_ms):'—';
+    document.getElementById('st-tok').textContent=fmtNum(s.total_tokens);
+    document.getElementById('st-rpm').textContent=s.rpm;
+    if(s.rpm_history){rpmHistory=s.rpm_history;updateSparkline();}
+  }catch{}
+  try{
+    const d=await apiFetch('/stats/daily').then(r=>r.json());
+    const diff=d.today_total-d.yesterday_total;
+    const pct=d.yesterday_total>0?Math.round(diff/d.yesterday_total*100):null;
+    const sub=document.getElementById('st-compare');
+    if(pct!==null){sub.className='sub '+(diff>=0?'up':'down');sub.textContent=(diff>=0?'↑':'↓')+Math.abs(pct)+'% vs昨日';}
+  }catch{}
+  if(Date.now()-lastActivityTime>120000) document.getElementById('idle-notice').style.display='';
+}
+function updateSparkline(){
+  const wrap=document.getElementById('rpm-spark');const max=Math.max(...rpmHistory,1);
+  wrap.innerHTML=rpmHistory.map(v=>`<div class="spark-bar" style="height:${Math.max(3,Math.round((v/max)*24))}px" title="${v} RPM"></div>`).join('');
+}
+async function refreshModels(){
+  try{
+    const d=await apiFetch('/models').then(r=>r.json());
+    const sel=document.getElementById('f-model'),cur=sel.value;
+    sel.innerHTML='<option value="">全部模型</option>'+d.models.map(m=>`<option value="${escapeHtml(m)}"${m===cur?' selected':''}>${escapeHtml(m)}</option>`).join('');
+  }catch{}
+}
+
+// STAT DETAIL POPUP
+async function openStatDetail(type){
+  document.getElementById('stat-popup').classList.add('open');
+  const body=document.getElementById('stat-popup-body');
+  body.innerHTML='<div class="skeleton skel-line w80" style="margin:20px 0"></div><div class="skeleton skel-box"></div>';
+  if(type==='tok'){
+    document.getElementById('stat-popup-title').textContent='Token消耗分布 - 各模型';
+    try{
+      const d=await apiFetch('/stats/token-dist?hours=24').then(r=>r.json());
+      if(!d.models.length){body.innerHTML='<div class="empty-state">暂无数据</div>';return;}
+      const total=d.models.reduce((s,m)=>s+m.total_tokens,0)||1;
+      let h='<table style="width:100%;border-collapse:collapse;font-size:12px"><tr><th style="text-align:left;padding:6px;border-bottom:1px solid var(--border);color:var(--text-muted)">模型</th><th style="text-align:right;padding:6px;border-bottom:1px solid var(--border);color:var(--text-muted)">输入</th><th style="text-align:right;padding:6px;border-bottom:1px solid var(--border);color:var(--text-muted)">输出</th><th style="text-align:right;padding:6px;border-bottom:1px solid var(--border);color:var(--text-muted)">总计</th></tr>';
+      for(const m of d.models) h+=`<tr><td style="padding:6px;border-bottom:1px solid var(--border-muted)">${escapeHtml(m.model)}</td><td style="text-align:right;padding:6px;border-bottom:1px solid var(--border-muted);color:var(--accent-blue)">${fmtNum(m.input_tokens)}</td><td style="text-align:right;padding:6px;border-bottom:1px solid var(--border-muted);color:var(--accent-green)">${fmtNum(m.output_tokens)}</td><td style="text-align:right;padding:6px;border-bottom:1px solid var(--border-muted);color:var(--accent-purple)">${fmtNum(m.total_tokens)} (${Math.round(m.total_tokens/total*100)}%)</td></tr>`;
+      body.innerHTML=h+'</table>';
+    }catch{body.innerHTML='<div class="empty-state">加载失败</div>';}
+  }else if(type==='lat'){
+    document.getElementById('stat-popup-title').textContent='延迟分布直方图';
+    try{
+      const d=await apiFetch('/stats/latency-dist?hours=24').then(r=>r.json());
+      if(!d.total){body.innerHTML='<div class="empty-state">暂无数据</div>';return;}
+      const max=Math.max(...d.buckets.map(b=>b.count),1);
+      let h=`<div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">共 ${d.total} 个成功请求（最近24小时）</div>`;
+      for(const b of d.buckets) h+=`<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px"><span>${escapeHtml(b.label)}</span><span style="color:var(--text-muted)">${b.count} (${Math.round(b.count/d.total*100)}%)</span></div><div style="height:20px;background:var(--bg-tertiary);border-radius:3px;overflow:hidden"><div style="height:100%;width:${Math.round(b.count/max*100)}%;background:var(--accent-yellow);border-radius:3px"></div></div></div>`;
+      body.innerHTML=h;
+    }catch{body.innerHTML='<div class="empty-state">加载失败</div>';}
+  }else if(type==='rate'){
+    document.getElementById('stat-popup-title').textContent='成功率详情';
+    if(!lastStatsData){body.innerHTML='<div class="empty-state">暂无数据</div>';return;}
+    const s=lastStatsData;
+    body.innerHTML=`<div class="token-viz"><div class="token-box"><div class="tv-val" style="color:var(--accent-green)">${s.success_count}</div><div class="tv-lbl">成功</div></div><div class="token-box"><div class="tv-val" style="color:var(--accent-red)">${s.failure_count}</div><div class="tv-lbl">失败</div></div><div class="token-box"><div class="tv-val" style="color:var(--accent-blue)">${s.success_rate}%</div><div class="tv-lbl">成功率</div></div></div>`;
+  }else{
+    document.getElementById('stat-popup-title').textContent='请求统计';
+    if(!lastStatsData){body.innerHTML='<div class="empty-state">暂无数据</div>';return;}
+    const s=lastStatsData;
+    body.innerHTML=`<div class="token-viz"><div class="token-box"><div class="tv-val" style="color:var(--accent-blue)">${s.total_requests}</div><div class="tv-lbl">总请求</div></div><div class="token-box"><div class="tv-val" style="color:var(--accent-green)">${s.success_count}</div><div class="tv-lbl">成功</div></div><div class="token-box"><div class="tv-val" style="color:var(--accent-red)">${s.failure_count}</div><div class="tv-lbl">失败</div></div></div>`;
+  }
+}
+function closeStatPopup(e){if(!e||e.target===document.getElementById('stat-popup'))document.getElementById('stat-popup').classList.remove('open');}
+
+// HISTORY
+async function loadHistory(){
+  liveMode=false;document.getElementById('btn-live').classList.remove('active');
+  const p=new URLSearchParams({page:currentPage,page_size:PAGE_SIZE});
+  const evts=getCheckedEvents();if(evts.length)p.set('event_types',evts.join(','));
+  const model=document.getElementById('f-model').value;if(model)p.set('model',model);
+  const status=document.getElementById('f-status').value;if(status)p.set('status',status);
+  const reqid=document.getElementById('f-reqid').value.trim();if(reqid)p.set('request_id',reqid);
+  const kw=document.getElementById('f-keyword').value.trim();if(kw)p.set('keyword',kw);
+  const start=document.getElementById('f-start').value;if(start)p.set('start_time',new Date(start).toISOString());
+  const end=document.getElementById('f-end').value;if(end)p.set('end_time',new Date(end).toISOString());
+  if(document.getElementById('f-annotated').checked)p.set('annotated_only','true');
+  try{const d=await apiFetch('/logs?'+p).then(r=>r.json());allLogs=d.data||[];filteredLogs=d.data;totalFromServer=d.total;renderList();}
+  catch(e){if(e.message!=='401')document.getElementById('log-list').innerHTML='<div class="empty-state"><div class="empty-icon">⚠️</div>加载日志失败。<div class="empty-hint"><button class="page-btn" onclick="loadHistory()" style="margin-top:8px">重试</button></div></div>';}
+}
+
+// CONTROLS
+function toggleLive(){if(liveMode){liveMode=false;document.getElementById('btn-live').classList.remove('active');loadHistory();}else{liveMode=true;currentPage=1;filteredLogs=allLogs.filter(matchFilter);document.getElementById('btn-live').classList.add('active');renderList();}}
+function toggleAutoScroll(){autoScroll=!autoScroll;document.getElementById('btn-autoscroll').classList.toggle('active',autoScroll);}
+function toggleRelTime(){useRelTime=!useRelTime;document.getElementById('btn-reltime').textContent=useRelTime?'🕐 相对时间':'🕐 绝对时间';renderList();}
+function clearView(){allLogs=[];filteredLogs=[];selectedEntry=null;preloadCache.clear();closeModal();document.getElementById('log-list').innerHTML='<div class="empty-state"><div class="empty-icon">🗑️</div>视图已清空。</div>';document.getElementById('log-count').textContent='';}
+function showExportMenu(){const choice=confirm('选择：确定=导出JSON，取消=导出CSV');if(choice)exportLogs('json');else exportLogs('csv');}
+function exportLogs(fmt){
+  const data=filteredLogs.length?filteredLogs:allLogs;
+  if(fmt==='csv'){const headers=['id','request_id','timestamp','event_type','model','duration_ms','input_tokens','output_tokens','error'];const rows=data.map(e=>headers.map(h=>JSON.stringify(e[h]??'')).join(','));const blob=new Blob([headers.join(',')+'\n'+rows.join('\n')],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='llm-logs-'+new Date().toISOString().slice(0,10)+'.csv';a.click();}
+  else{const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='llm-logs-'+new Date().toISOString().slice(0,19).replace(/:/g,'-')+'.json';a.click();}
+}
+function toggleCharts(){chartsOpen=!chartsOpen;document.getElementById('charts-panel').classList.toggle('open',chartsOpen);document.getElementById('btn-charts').classList.toggle('active',chartsOpen);if(chartsOpen)refreshCharts();}
+async function confirmDeleteOld(){
+  const d=prompt('删除此日期之前的日志（YYYY-MM-DD），留空则删除全部：');
+  if(d===null)return;
+  const url=d?'/logs?before_date='+encodeURIComponent(d):'/logs';
+  const res=await apiFetch(url,{method:'DELETE'});const j=await res.json();
+  alert('已删除 '+j.deleted+' 条记录。');clearView();
+}
+
+// COL PREFS
+function loadColPrefs(){try{const s=localStorage.getItem('llm_col_prefs');if(s)colPrefs={...colPrefs,...JSON.parse(s)};}catch{}document.querySelectorAll('[data-col]').forEach(cb=>{const k=cb.dataset.col;if(k in colPrefs)cb.checked=colPrefs[k];});applyColPrefs();}
+function saveColPrefs(){document.querySelectorAll('[data-col]').forEach(cb=>{colPrefs[cb.dataset.col]=cb.checked;});localStorage.setItem('llm_col_prefs',JSON.stringify(colPrefs));applyColPrefs();renderList();}
+function applyColPrefs(){['evt','model','time','dur','tok'].forEach(k=>{const hdr=document.getElementById('hdr-'+k);if(hdr)hdr.style.display=colPrefs[k]?'':'none';});}
+function toggleColPicker(e){e.stopPropagation();document.getElementById('col-picker').classList.toggle('open');}
+document.addEventListener('click',()=>document.getElementById('col-picker').classList.remove('open'));
+
+// CHARTS
+async function refreshCharts(){
+  const cOpt={responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#8b949e',font:{size:10}}}},scales:{x:{ticks:{color:'#6e7681',font:{size:9}},grid:{color:'#21262d'}},y:{ticks:{color:'#6e7681',font:{size:9}},grid:{color:'#21262d'},beginAtZero:true}}};
+  try{const d=await apiFetch('/stats/timeline?minutes=60&bucket=5').then(r=>r.json());const labels=d.timeline.map(t=>t.time.slice(11,16));const ctx1=document.getElementById('chart-timeline').getContext('2d');if(chartTimeline)chartTimeline.destroy();chartTimeline=new Chart(ctx1,{type:'line',data:{labels,datasets:[{label:'请求',data:d.timeline.map(t=>t.requests),borderColor:'#388bfd',backgroundColor:'rgba(56,139,253,.15)',tension:.3,fill:true,pointRadius:2},{label:'错误',data:d.timeline.map(t=>t.errors),borderColor:'#f85149',backgroundColor:'rgba(248,81,73,.1)',tension:.3,fill:true,pointRadius:2}]},options:cOpt});}catch{}
+  try{const d=await apiFetch('/stats/models?hours=24').then(r=>r.json());if(d.models.length){const ctx2=document.getElementById('chart-models').getContext('2d');if(chartModels)chartModels.destroy();chartModels=new Chart(ctx2,{type:'doughnut',data:{labels:d.models.map(m=>m.model),datasets:[{data:d.models.map(m=>m.requests),backgroundColor:['#388bfd','#3fb950','#d29922','#bc8cff','#f0883e','#f85149'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#8b949e',font:{size:9},padding:6}}}}});const ctx3=document.getElementById('chart-latency').getContext('2d');if(chartLatency)chartLatency.destroy();chartLatency=new Chart(ctx3,{type:'bar',data:{labels:d.models.map(m=>m.model),datasets:[{label:'平均响应时间(ms)',data:d.models.map(m=>m.avg_ms?Math.round(m.avg_ms):0),backgroundColor:'rgba(210,153,34,.7)',borderColor:'#d29922',borderWidth:1}]},options:{...cOpt,indexAxis:'y'}});}}catch{}
+  try{const d=await apiFetch('/stats/daily').then(r=>r.json());const ctx4=document.getElementById('chart-daily').getContext('2d');if(chartDaily)chartDaily.destroy();chartDaily=new Chart(ctx4,{type:'bar',data:{labels:['昨日','今日'],datasets:[{label:'请求数',data:[d.yesterday_total,d.today_total],backgroundColor:['rgba(139,148,158,.4)','rgba(56,139,253,.7)'],borderColor:['#8b949e','#388bfd'],borderWidth:1}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#8b949e',font:{size:9}}}},scales:{x:{ticks:{color:'#6e7681',font:{size:9}},grid:{color:'#21262d'}},y:{ticks:{color:'#6e7681',font:{size:9}},grid:{color:'#21262d'},beginAtZero:true}}}});}catch{}
+}
+
+// CONTEXT MENU
+function showContextMenu(ev,entry){
+  ctxEntry=entry;
+  const cmpItem=document.getElementById('ctx-compare-item');
+  if(cmpItem)cmpItem.style.display=(selectedIds.size===1&&!selectedIds.has(entry.id||''))?'block':'none';
+  const menu=document.getElementById('ctx-menu');
+  menu.style.display='block';
+  menu.style.left=Math.min(ev.clientX,window.innerWidth-210)+'px';
+  menu.style.top=Math.min(ev.clientY,window.innerHeight-200)+'px';
+}
+function hideContextMenu(){document.getElementById('ctx-menu').style.display='none';}
+document.addEventListener('click',hideContextMenu);
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){closeModal();hideContextMenu();document.getElementById('stat-popup').classList.remove('open');closeCompare();}
+  if(e.key==='/'&&document.activeElement.tagName!=='INPUT'){e.preventDefault();document.getElementById('f-keyword').focus();}
+  if(e.key===' '&&document.activeElement.tagName!=='INPUT'){e.preventDefault();toggleLive();}
+});
+function ctxCopyReqId(){if(ctxEntry)copyStr(ctxEntry.request_id||'');hideContextMenu();}
+function ctxCopyMsg(){if(!ctxEntry)return;let text='';if(ctxEntry.request_body&&ctxEntry.request_body.messages){const msgs=ctxEntry.request_body.messages;if(msgs.length){const last=msgs[msgs.length-1];text=typeof last.content==='string'?last.content:JSON.stringify(last.content);}}else{text=ctxEntry.chunk_data||ctxEntry.error||'';}copyStr(text);hideContextMenu();}
+function ctxFilterModel(){if(!ctxEntry||!ctxEntry.model)return;document.getElementById('f-model').value=ctxEntry.model;applyFilter();hideContextMenu();}
+function ctxFilterReqId(){if(!ctxEntry||!ctxEntry.request_id)return;document.getElementById('f-reqid').value=ctxEntry.request_id;applyFilter();hideContextMenu();}
+function ctxOpenNewTab(){if(!ctxEntry)return;window.open(location.origin+'/?request_id='+encodeURIComponent(ctxEntry.request_id||''),'_blank');hideContextMenu();}
+async function ctxAnnotate(){
+  if(!ctxEntry)return;
+  const note=prompt('输入备注内容：');if(!note)return;
+  try{
+    await apiFetch('/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({log_id:ctxEntry.id||'',request_id:ctxEntry.request_id,note})});
+    const row=document.querySelector(`.log-row[data-id="${CSS.escape(ctxEntry.id||'')}"]`);
+    if(row){const existing=row.querySelector('.note-pin');if(!existing){const pin=document.createElement('span');pin.className='note-pin';pin.textContent='📌';const reqCell=row.querySelector('.col-req-cell');if(reqCell)reqCell.appendChild(pin);}}
+    const entry=allLogs.find(e=>e.id===ctxEntry.id);if(entry)entry.has_note=true;
+  }catch{}
+  hideContextMenu();
+}
+function ctxCompare(){
+  if(!ctxEntry||selectedIds.size!==1)return;
+  const selectedId=[...selectedIds][0];
+  const e1=allLogs.find(e=>e.id===selectedId);
+  if(!e1||!ctxEntry)return;
+  openCompare(e1,ctxEntry);hideContextMenu();
+}
+
+// COMPARE
+function openCompare(e1,e2){
+  document.getElementById('compare-modal').classList.add('open');
+  const cols=document.getElementById('compare-cols');
+  cols.innerHTML=`<div class="compare-col"><div class="compare-col-title">A: ${escapeHtml((e1.request_id||'').slice(0,20))}</div>${buildCompareContent(e1)}</div><div class="compare-col"><div class="compare-col-title">B: ${escapeHtml((e2.request_id||'').slice(0,20))}</div>${buildCompareContent(e2)}</div>`;
+}
+function buildCompareContent(entry){
+  let h=`<div style="font-size:11px;margin-bottom:10px"><span class="evt-badge evt-${escapeHtml(entry.event_type)}">${escapeHtml(evtLabel(entry.event_type))}</span> <strong>${escapeHtml(entry.model||'')}</strong> ${fmtDateTime(entry.timestamp)}</div>`;
+  if(entry.request_body&&entry.request_body.messages){const msgs=entry.request_body.messages;h+=`<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">请求消息 (${msgs.length}条)</div>`;for(const m of msgs.slice(-3)){h+=`<div class="msg-card ${escapeHtml(m.role||'')}"><div class="msg-role-label ${escapeHtml(m.role||'')}">● ${escapeHtml(m.role||'')}</div><div class="msg-body" style="font-size:11px">${escapeHtml(String(m.content||'').slice(0,300))}</div></div>`;}}
+  if(entry.response_body&&entry.response_body.choices&&entry.response_body.choices[0]){const c=entry.response_body.choices[0];const rt=(c.message&&c.message.content)||'';if(rt)h+=`<div style="font-size:11px;color:var(--text-muted);margin:8px 0 4px">响应内容</div><div style="background:var(--bg-tertiary);border-radius:4px;padding:8px;font-size:11px;white-space:pre-wrap;max-height:200px;overflow-y:auto">${escapeHtml(rt.slice(0,600))}</div>`;}
+  if(entry.duration_ms!=null)h+=`<div style="font-size:11px;margin-top:8px">耗时: <span class="${durClass(entry.duration_ms)}">${fmtDur(entry.duration_ms)}</span></div>`;
+  if(entry.input_tokens||entry.output_tokens)h+=`<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Token: ${fmtNum(entry.input_tokens||0)} + ${fmtNum(entry.output_tokens||0)}</div>`;
+  return h;
+}
+function closeCompare(){document.getElementById('compare-modal').classList.remove('open');}
+
+// IDLE
+setInterval(()=>{
+  if(Date.now()-lastActivityTime>120000)document.getElementById('idle-notice').style.display='';
+  else document.getElementById('idle-notice').style.display='none';
+},10000);
+
+// INIT
+async function initApp(){
+  setupMarked();loadColPrefs();connectWS();refreshStats();refreshModels();
+  const urlParams=new URLSearchParams(location.search);
+  const directReqId=urlParams.get('request_id');
+  if(directReqId) document.getElementById('f-reqid').value=directReqId;
+  try{const d=await apiFetch('/logs?page=1&page_size='+PAGE_SIZE).then(r=>r.json());allLogs=d.data||[];totalFromServer=d.total;}catch(e){if(e.message==='401')return;}
+  filteredLogs=allLogs.filter(matchFilter);renderList();
+  liveMode=true;lastActivityTime=Date.now();document.getElementById('btn-live').classList.add('active');
+  if(directReqId){const entry=allLogs.find(e=>e.request_id===directReqId);if(entry)setTimeout(()=>openModalForReqId(directReqId,entry),300);}
+  setInterval(refreshStats,10000);setInterval(refreshModels,30000);setInterval(()=>{if(chartsOpen)refreshCharts();},30000);
+}
+(async function boot(){
+  const valid=await checkAuth();
+  if(valid)initApp();else showLoginPage();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+services:
+  llm-logger:
+    build: ./logger_server
+    container_name: llm-logger
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./logs:/app/logs
+      - ./logger_server/static:/app/static
+      - ./logger_server/main.py:/app/main.py
+    restart: unless-stopped
+    networks:
+      - litellm_default
+
+networks:
+  litellm_default:
+    external: true

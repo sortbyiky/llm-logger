@@ -1,0 +1,9 @@
+logs/*.jsonl
+logs/*.db
+logs/*.db-shm
+logs/*.db-wal
+logs/config.json
+TASK.md
+__pycache__/
+*.pyc
+.env
