@@ -479,6 +479,7 @@ pre.json-code { font-family:'Menlo','Consolas',monospace; font-size:11px; white-
   <div class="stat-card" onclick="openStatDetail('tok')"><div class="label">总Token消耗</div><div class="value purple" id="st-tok">—</div></div>
   <div class="stat-card" onclick="openStatDetail('cost')"><div class="label">💰 总成本</div><div class="value yellow" id="st-cost">—</div></div>
   <div class="stat-card"><div class="label">每分钟请求(RPM)</div><div class="value" id="st-rpm">—</div><div class="sub" id="st-compare"></div></div>
+  <div class="stat-card" onclick="openStatDetail('users')"><div class="label">👤 用户统计</div><div class="value blue" id="st-users">—</div></div>
 </div>
 
 <!-- STAT DETAIL POPUP -->
@@ -679,6 +680,26 @@ pre.json-code { font-family:'Menlo','Consolas',monospace; font-size:11px; white-
         <input class="alert-input" id="ac-tok-thr" type="number" min="1" placeholder="10" style="width:60px">
         <span style="font-size:11px;color:var(--text-muted)">百万token</span>
       </div>
+    </div>
+    <div class="alert-section" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border-muted)">
+      <div style="font-weight:600;font-size:13px;margin-bottom:8px">📊 日报设置</div>
+      <div class="alert-toggle">
+        <input type="checkbox" id="ac-report-en"><label for="ac-report-en">启用每日日报推送</label>
+      </div>
+      <div class="alert-toggle" style="margin-top:4px">
+        <label style="font-size:12px;margin-right:6px">发送时间(北京时间)</label>
+        <select id="ac-report-hour" style="padding:2px 6px;border-radius:4px;border:1px solid var(--border-muted);background:var(--bg-secondary);color:var(--text-primary);font-size:12px">
+          <option value="0">00:00</option><option value="1">01:00</option><option value="2">02:00</option>
+          <option value="3">03:00</option><option value="4">04:00</option><option value="5">05:00</option>
+          <option value="6">06:00</option><option value="7">07:00</option><option value="8">08:00</option>
+          <option value="9" selected>09:00</option><option value="10">10:00</option><option value="11">11:00</option>
+          <option value="12">12:00</option><option value="13">13:00</option><option value="14">14:00</option>
+          <option value="15">15:00</option><option value="16">16:00</option><option value="17">17:00</option>
+          <option value="18">18:00</option><option value="19">19:00</option><option value="20">20:00</option>
+          <option value="21">21:00</option><option value="22">22:00</option><option value="23">23:00</option>
+        </select>
+      </div>
+      <button class="alert-btn test" style="margin-top:8px;font-size:11px" onclick="testDailyReport()">立即发送一次日报</button>
     </div>
     <div class="alert-msg" id="ac-msg"></div>
     <div class="alert-btns">
@@ -1397,6 +1418,11 @@ async function refreshStats(){
     if(s.total_cost_usd!=null){const c=s.total_cost_usd;document.getElementById('st-cost').textContent=c===0?'$0':c<1?'$'+c.toFixed(4):'$'+c.toFixed(2);}
   }catch{}
   try{
+    const ak=await apiFetch('/stats/api-keys?hours=24').then(r=>r.json());
+    document.getElementById('st-users').textContent=ak.api_keys?ak.api_keys.length:'0';
+    window._lastApiKeyStats=ak.api_keys||[];
+  }catch{}
+  try{
     const d=await apiFetch('/stats/daily').then(r=>r.json());
     const diff=d.today_total-d.yesterday_total;
     const pct=d.yesterday_total>0?Math.round(diff/d.yesterday_total*100):null;
@@ -1455,6 +1481,15 @@ async function openStatDetail(type){
       const total=d.models.reduce((s,m)=>s+(m.cost_usd||0),0)||1;
       let h='<table style="width:100%;border-collapse:collapse;font-size:12px"><tr><th style="text-align:left;padding:6px;border-bottom:1px solid var(--border);color:var(--text-muted)">模型</th><th style="text-align:right;padding:6px;border-bottom:1px solid var(--border);color:var(--text-muted)">请求数</th><th style="text-align:right;padding:6px;border-bottom:1px solid var(--border);color:var(--text-muted)">成本(USD)</th><th style="text-align:right;padding:6px;border-bottom:1px solid var(--border);color:var(--text-muted)">占比</th></tr>';
       for(const m of d.models){const c=m.cost_usd||0;h+=`<tr><td style="padding:6px;border-bottom:1px solid var(--border-muted)">${escapeHtml(m.model)}</td><td style="text-align:right;padding:6px;border-bottom:1px solid var(--border-muted);color:var(--accent-blue)">${fmtNum(m.requests)}</td><td style="text-align:right;padding:6px;border-bottom:1px solid var(--border-muted);color:var(--accent-yellow)">${c<0.0001?c.toFixed(6):c<0.01?c.toFixed(4):'$'+c.toFixed(2)}</td><td style="text-align:right;padding:6px;border-bottom:1px solid var(--border-muted);color:var(--text-muted)">${Math.round(c/total*100)}%</td></tr>`;}
+      body.innerHTML=h+'</table>';
+    }catch{body.innerHTML='<div class="empty-state">加载失败</div>';}
+  }else if(type==='users'){
+    document.getElementById('stat-popup-title').textContent='👤 用户/API Key 统计（24h）';
+    try{
+      const d=await apiFetch('/stats/api-keys?hours=24').then(r=>r.json());
+      if(!d.api_keys||!d.api_keys.length){body.innerHTML='<div class="empty-state">暂无数据</div>';return;}
+      let h='<table style="width:100%;border-collapse:collapse;font-size:12px"><tr><th style="text-align:left;padding:6px;border-bottom:1px solid var(--border);color:var(--text-muted)">API Key</th><th style="text-align:right;padding:6px;border-bottom:1px solid var(--border);color:var(--text-muted)">请求</th><th style="text-align:right;padding:6px;border-bottom:1px solid var(--border);color:var(--text-muted)">成功</th><th style="text-align:right;padding:6px;border-bottom:1px solid var(--border);color:var(--text-muted)">失败</th><th style="text-align:right;padding:6px;border-bottom:1px solid var(--border);color:var(--text-muted)">输入Token</th><th style="text-align:right;padding:6px;border-bottom:1px solid var(--border);color:var(--text-muted)">输出Token</th><th style="text-align:right;padding:6px;border-bottom:1px solid var(--border);color:var(--text-muted)">成本(USD)</th><th style="text-align:right;padding:6px;border-bottom:1px solid var(--border);color:var(--text-muted)">平均延迟</th></tr>';
+      for(const k of d.api_keys){const c=k.cost_usd||0;h+=`<tr><td style="padding:6px;border-bottom:1px solid var(--border-muted);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(k.api_key)}">${escapeHtml(k.api_key)}</td><td style="text-align:right;padding:6px;border-bottom:1px solid var(--border-muted);color:var(--accent-blue)">${fmtNum(k.requests)}</td><td style="text-align:right;padding:6px;border-bottom:1px solid var(--border-muted);color:var(--accent-green)">${fmtNum(k.successes)}</td><td style="text-align:right;padding:6px;border-bottom:1px solid var(--border-muted);color:var(--accent-red)">${fmtNum(k.failures)}</td><td style="text-align:right;padding:6px;border-bottom:1px solid var(--border-muted)">${fmtNum(k.input_tokens)}</td><td style="text-align:right;padding:6px;border-bottom:1px solid var(--border-muted)">${fmtNum(k.output_tokens)}</td><td style="text-align:right;padding:6px;border-bottom:1px solid var(--border-muted);color:var(--accent-yellow)">${c<0.0001?c.toFixed(6):c<0.01?'$'+c.toFixed(4):'$'+c.toFixed(2)}</td><td style="text-align:right;padding:6px;border-bottom:1px solid var(--border-muted)">${k.avg_ms?fmtDur(k.avg_ms):'—'}</td></tr>`;}
       body.innerHTML=h+'</table>';
     }catch{body.innerHTML='<div class="empty-state">加载失败</div>';}
   }else{

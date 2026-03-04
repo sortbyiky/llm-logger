@@ -192,12 +192,15 @@ CREATE TABLE IF NOT EXISTS logs (
     hidden        INTEGER DEFAULT 0,
     chunk_count   INTEGER DEFAULT 0,
     stream_content TEXT,
-    cost_usd      REAL
+    cost_usd      REAL,
+    user_api_key  TEXT,
+    conversation_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_timestamp   ON logs(timestamp);
 CREATE INDEX IF NOT EXISTS idx_request_id  ON logs(request_id);
 CREATE INDEX IF NOT EXISTS idx_event_type  ON logs(event_type);
 CREATE INDEX IF NOT EXISTS idx_model       ON logs(model);
+CREATE INDEX IF NOT EXISTS idx_conversation_id ON logs(conversation_id);
 
 CREATE TABLE IF NOT EXISTS notes (
     id         TEXT PRIMARY KEY,
@@ -225,6 +228,8 @@ MIGRATION_SQL = [
     "ALTER TABLE logs ADD COLUMN chunk_count INTEGER DEFAULT 0",
     "ALTER TABLE logs ADD COLUMN stream_content TEXT",
     "ALTER TABLE logs ADD COLUMN cost_usd REAL",
+    "ALTER TABLE logs ADD COLUMN user_api_key TEXT",
+    "ALTER TABLE logs ADD COLUMN conversation_id TEXT",
 ]
 
 _db_conn: Optional[aiosqlite.Connection] = None
@@ -429,6 +434,161 @@ async def run_alert_checks():
             )
 
 # ──────────────────────────────────────────────
+# 每日日报
+# ──────────────────────────────────────────────
+async def generate_daily_report() -> str:
+    """生成昨日日报文本"""
+    db = await get_db()
+    now = datetime.utcnow()
+    yesterday_start = (now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)).isoformat() + "Z"
+    yesterday_end = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat() + "Z"
+    report_date = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    # 总览统计
+    async with db.execute("""
+        WITH base AS (
+            SELECT event_type, duration_ms, input_tokens, output_tokens, cost_usd, model, error
+            FROM logs WHERE timestamp >= ? AND timestamp < ? AND hidden = 0
+        )
+        SELECT
+            COUNT(CASE WHEN event_type='success' THEN 1 END) as success_count,
+            COUNT(CASE WHEN event_type='failure' THEN 1 END) as failure_count,
+            AVG(CASE WHEN event_type='success' AND duration_ms IS NOT NULL THEN duration_ms END) as avg_ms,
+            SUM(CASE WHEN event_type='success' THEN COALESCE(input_tokens,0) ELSE 0 END) as total_input,
+            SUM(CASE WHEN event_type='success' THEN COALESCE(output_tokens,0) ELSE 0 END) as total_output,
+            SUM(CASE WHEN event_type='success' AND cost_usd IS NOT NULL THEN cost_usd END) as total_cost
+        FROM base
+    """, (yesterday_start, yesterday_end)) as cur:
+        row = await cur.fetchone()
+        success_count = row["success_count"] or 0
+        failure_count = row["failure_count"] or 0
+        avg_ms = row["avg_ms"] or 0
+        total_input = row["total_input"] or 0
+        total_output = row["total_output"] or 0
+        total_cost = row["total_cost"] or 0.0
+
+    total = success_count + failure_count
+    success_rate = round(success_count / total * 100, 1) if total > 0 else 0
+    total_tokens = total_input + total_output
+
+    def fmt_tokens(n):
+        if n >= 1_000_000:
+            return f"{n/1_000_000:,.1f}M" if n >= 10_000_000 else f"{n:,}"
+        return f"{n:,}"
+
+    lines = [
+        f"📊 LLM 日报 - {report_date}",
+        "",
+        "📈 总览",
+        f"• 总请求：{total} 次（✅ {success_count} 成功 / ❌ {failure_count} 失败）",
+        f"• 成功率：{success_rate}%",
+        f"• 总 Token：{fmt_tokens(total_tokens)}（输入 {fmt_tokens(total_input)} / 输出 {fmt_tokens(total_output)}）",
+        f"• 总成本：${total_cost:,.2f}",
+        f"• 平均延迟：{avg_ms/1000:.1f}s",
+    ]
+
+    # 模型用量 Top 3
+    async with db.execute("""
+        SELECT model, COUNT(*) as cnt, SUM(COALESCE(cost_usd,0)) as cost
+        FROM logs WHERE timestamp >= ? AND timestamp < ? AND event_type='success'
+            AND model IS NOT NULL AND model != '' AND hidden=0
+        GROUP BY model ORDER BY cnt DESC LIMIT 3
+    """, (yesterday_start, yesterday_end)) as cur:
+        model_rows = await cur.fetchall()
+
+    if model_rows:
+        lines += ["", "🏆 模型用量 Top 3"]
+        for i, r in enumerate(model_rows, 1):
+            lines.append(f"{i}. {r['model']}：{r['cnt']}次 ${r['cost']:.1f}")
+
+    # 最贵的3个请求
+    async with db.execute("""
+        SELECT cost_usd, model, COALESCE(input_tokens,0)+COALESCE(output_tokens,0) as tokens, duration_ms
+        FROM logs WHERE timestamp >= ? AND timestamp < ? AND event_type='success'
+            AND cost_usd IS NOT NULL AND hidden=0
+        ORDER BY cost_usd DESC LIMIT 3
+    """, (yesterday_start, yesterday_end)) as cur:
+        expensive_rows = await cur.fetchall()
+
+    if expensive_rows:
+        lines += ["", "💸 最贵的3个请求"]
+        for i, r in enumerate(expensive_rows, 1):
+            dur = f"{r['duration_ms']/1000:.0f}s" if r["duration_ms"] else "N/A"
+            tok = fmt_tokens(r["tokens"])
+            lines.append(f"{i}. ${r['cost_usd']:.2f} · {r['model'] or '未知'} · {tok} tokens · {dur}")
+
+    # 错误分布 Top 3
+    async with db.execute("""
+        SELECT error FROM logs
+        WHERE timestamp >= ? AND timestamp < ? AND event_type='failure'
+            AND error IS NOT NULL AND hidden=0
+    """, (yesterday_start, yesterday_end)) as cur:
+        error_rows = await cur.fetchall()
+
+    if error_rows:
+        error_types: dict = {}
+        for r in error_rows:
+            err = str(r["error"])
+            first_line = err.split("\n")[0].split(":")[0].strip()[:40]
+            if not first_line:
+                first_line = err[:40]
+            error_types[first_line] = error_types.get(first_line, 0) + 1
+        sorted_errors = sorted(error_types.items(), key=lambda x: -x[1])[:3]
+        if sorted_errors:
+            lines += ["", "⚠️ 错误分布 Top 3"]
+            for i, (err, cnt) in enumerate(sorted_errors, 1):
+                lines.append(f"{i}. {err}: {cnt}次")
+
+    if total == 0:
+        lines = [f"📊 LLM 日报 - {report_date}", "", "昨日无请求数据。"]
+
+    return "\n".join(lines)
+
+
+async def send_daily_report():
+    """生成并发送日报到 Telegram"""
+    report_text = await generate_daily_report()
+    ac = get_alert_config()
+    tg_token = ac.get("telegram_bot_token", "")
+    tg_chat = ac.get("telegram_chat_id", "")
+    if tg_token and tg_chat:
+        try:
+            await send_telegram(tg_token, tg_chat, report_text)
+            print(f"[llm-logger] daily report sent to Telegram")
+        except Exception as e:
+            print(f"[llm-logger] daily report Telegram error: {e}")
+    else:
+        print("[llm-logger] daily report: Telegram not configured, skipped")
+
+
+async def daily_report_task():
+    """后台任务：每天定时发送日报"""
+    await asyncio.sleep(10)  # 启动延迟
+    while True:
+        try:
+            ac = get_alert_config()
+            if not ac.get("daily_report_enabled", False):
+                await asyncio.sleep(300)  # 未启用，每5分钟检查一次配置
+                continue
+            hour_utc = int(ac.get("daily_report_hour_utc", 1))
+            now = datetime.utcnow()
+            target = now.replace(hour=hour_utc, minute=0, second=0, microsecond=0)
+            if target <= now:
+                target += timedelta(days=1)
+            wait_seconds = (target - now).total_seconds()
+            print(f"[llm-logger] daily report scheduled at {target.isoformat()}Z (in {wait_seconds:.0f}s)")
+            await asyncio.sleep(wait_seconds)
+            ac = get_alert_config()
+            if ac.get("daily_report_enabled", False):
+                await send_daily_report()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"[llm-logger] daily report task error: {e}")
+            await asyncio.sleep(60)
+
+
+# ──────────────────────────────────────────────
 # Lifespan
 # ──────────────────────────────────────────────
 @asynccontextmanager
@@ -437,9 +597,11 @@ async def lifespan(app: FastAPI):
     await get_db()
     cleanup_task = asyncio.create_task(auto_cleanup_task())
     alert_task = asyncio.create_task(alert_check_task())
+    report_task = asyncio.create_task(daily_report_task())
     yield
     cleanup_task.cancel()
     alert_task.cancel()
+    report_task.cancel()
     if _db_conn:
         await _db_conn.close()
 
@@ -465,6 +627,8 @@ class LogEntry(BaseModel):
     stream_content: Optional[str] = None
     error: Optional[str] = None
     metadata: Optional[dict] = None
+    user_api_key: Optional[str] = None
+    conversation_id: Optional[str] = None
 
 class LoginRequest(BaseModel):
     password: str
@@ -490,6 +654,8 @@ class AlertConfigRequest(BaseModel):
     large_request_threshold: Optional[int] = 100000
     daily_token_enabled: Optional[bool] = False
     daily_token_threshold_m: Optional[float] = 10.0
+    daily_report_enabled: Optional[bool] = False
+    daily_report_hour_utc: Optional[int] = 1  # UTC 几点发送，默认1点(北京9点)
 
 # ──────────────────────────────────────────────
 # AUTH endpoints (no auth required)
@@ -531,6 +697,14 @@ async def receive_log(entry: LogEntry):
     if not entry.timestamp:
         entry.timestamp = datetime.utcnow().isoformat() + "Z"
 
+    # 从 metadata 提取 user_api_key
+    if not entry.user_api_key and entry.metadata:
+        entry.user_api_key = entry.metadata.get("user_api_key") or "unknown"
+
+    # 从 metadata 提取 conversation_id
+    if not entry.conversation_id and entry.metadata:
+        entry.conversation_id = entry.metadata.get("conversation_id") or entry.metadata.get("user_id") or entry.metadata.get("session_id") or ""
+
     db = await get_db()
 
     # ── chunk 事件：累积到内存缓冲区，标记 hidden=1 存库 ──
@@ -548,8 +722,8 @@ async def receive_log(entry: LogEntry):
             """INSERT OR REPLACE INTO logs
                (id, request_id, timestamp, event_type, model, upstream_model,
                 duration_ms, input_tokens, output_tokens,
-                request_body, response_body, chunk_data, error, metadata, hidden)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)""",
+                request_body, response_body, chunk_data, error, metadata, hidden, user_api_key, conversation_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)""",
             (
                 entry.id, entry.request_id, entry.timestamp, entry.event_type,
                 entry.model, entry.upstream_model, entry.duration_ms,
@@ -558,6 +732,7 @@ async def receive_log(entry: LogEntry):
                 json.dumps(entry.response_body, ensure_ascii=False) if entry.response_body else None,
                 entry.chunk_data, entry.error,
                 json.dumps(entry.metadata, ensure_ascii=False) if entry.metadata else None,
+                entry.user_api_key, entry.conversation_id,
             ),
         )
         await db.commit()
@@ -605,20 +780,15 @@ async def receive_log(entry: LogEntry):
     if entry.event_type == "success":
         cost_usd = calc_cost(entry.model, entry.input_tokens, entry.output_tokens)
 
-    # 性能优化5：response_body 只存摘要（前2KB），避免大JSON拖慢写入
     response_body_to_store = entry.response_body
-    if response_body_to_store:
-        rb_str = json.dumps(response_body_to_store, ensure_ascii=False)
-        if len(rb_str) > 2048:
-            response_body_to_store = {"_truncated": True, "_preview": rb_str[:2048]}
 
     await db.execute(
         """INSERT OR IGNORE INTO logs
            (id, request_id, timestamp, event_type, model, upstream_model,
             duration_ms, input_tokens, output_tokens,
             request_body, response_body, chunk_data, error, metadata,
-            hidden, chunk_count, stream_content, cost_usd)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)""",
+            hidden, chunk_count, stream_content, cost_usd, user_api_key, conversation_id)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?)""",
         (
             entry.id, entry.request_id, entry.timestamp, entry.event_type,
             entry.model, entry.upstream_model, entry.duration_ms,
@@ -627,7 +797,7 @@ async def receive_log(entry: LogEntry):
             json.dumps(response_body_to_store, ensure_ascii=False) if response_body_to_store else None,
             entry.chunk_data, entry.error,
             json.dumps(entry.metadata, ensure_ascii=False) if entry.metadata else None,
-            chunk_count, stream_content, cost_usd,
+            chunk_count, stream_content, cost_usd, entry.user_api_key, entry.conversation_id,
         ),
     )
     await db.commit()
@@ -873,6 +1043,28 @@ async def get_stats(hours: int = Query(24, ge=1, le=720), _=Depends(require_auth
         "rpm": rpm,
         "rpm_history": rpm_history,
     }
+
+@app.get("/stats/api-keys")
+async def get_api_key_stats(hours: int = Query(24, ge=1, le=720), _=Depends(require_auth)):
+    db = await get_db()
+    since = (datetime.utcnow() - timedelta(hours=hours)).isoformat() + "Z"
+    async with db.execute(
+        """SELECT COALESCE(user_api_key, 'unknown') as api_key,
+                  COUNT(*) as requests,
+                  SUM(CASE WHEN event_type='success' THEN 1 ELSE 0 END) as successes,
+                  SUM(CASE WHEN event_type='failure' THEN 1 ELSE 0 END) as failures,
+                  SUM(COALESCE(input_tokens,0)) as input_tokens,
+                  SUM(COALESCE(output_tokens,0)) as output_tokens,
+                  SUM(COALESCE(cost_usd,0)) as cost_usd,
+                  AVG(CASE WHEN event_type='success' THEN duration_ms END) as avg_ms
+           FROM logs
+           WHERE timestamp >= ? AND event_type IN ('success','failure')
+           GROUP BY COALESCE(user_api_key, 'unknown')
+           ORDER BY cost_usd DESC""",
+        (since,),
+    ) as cur:
+        rows = await cur.fetchall()
+    return {"api_keys": [dict(r) for r in rows]}
 
 @app.get("/stats/models")
 async def get_model_stats(hours: int = Query(24, ge=1, le=720), _=Depends(require_auth)):
@@ -1161,6 +1353,30 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
     except Exception:
         manager.disconnect(websocket)
+
+# ──────────────────────────────────────────────
+# 日报 API
+# ──────────────────────────────────────────────
+@app.get("/stats/daily-report")
+async def get_daily_report_preview(_=Depends(require_auth)):
+    """手动触发生成日报预览，返回文本内容（不发送）"""
+    text = await generate_daily_report()
+    return {"report": text}
+
+@app.post("/stats/daily-report/send")
+async def send_daily_report_now(_=Depends(require_auth)):
+    """立即发送日报（用于测试）"""
+    report_text = await generate_daily_report()
+    ac = get_alert_config()
+    tg_token = ac.get("telegram_bot_token", "")
+    tg_chat = ac.get("telegram_chat_id", "")
+    if not tg_token or not tg_chat:
+        return {"ok": False, "error": "Telegram 未配置"}
+    try:
+        await send_telegram(tg_token, tg_chat, report_text)
+        return {"ok": True, "report": report_text}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 # ──────────────────────────────────────────────
 # 告警配置 API
