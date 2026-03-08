@@ -899,12 +899,14 @@ window._fullJsonStore={};
 function jsonBlock(obj, id) {
   if(obj==null) return '<div style="color:var(--text-muted);font-style:italic;padding:8px">无数据</div>';
   const str=typeof obj==='string'?obj:JSON.stringify(obj,null,2);
-  const truncated=str.length>50000;
-  const display=truncated?str.slice(0,50000):str;
+  const BIG=100000;
+  const truncated=str.length>500000;
+  const display=truncated?str.slice(0,500000):str;
   window._fullJsonStore[id]=str;
-  return `<div class="json-wrap"><button class="json-copy" onclick="copyText('jblk-${id}')">复制</button><pre class="json-code" id="jblk-${id}">${syntaxHL(display)}</pre>${truncated?`<div style="padding:8px;text-align:center"><button class="page-btn" onclick="expandJsonFull('jblk-${id}','${id}')">加载完整内容 (${fmtNum(str.length)} chars)</button></div>`:''}</div>`;
+  const highlighted=display.length>BIG?escapeHtml(display):syntaxHL(display);
+  return `<div class="json-wrap"><button class="json-copy" onclick="copyText('jblk-${id}')">复制</button><pre class="json-code" id="jblk-${id}">${highlighted}</pre>${truncated?`<div style="padding:8px;text-align:center"><button class="page-btn" onclick="expandJsonFull('jblk-${id}','${id}')">加载完整内容 (${fmtNum(str.length)} chars)</button></div>`:''}</div>`;
 }
-window.expandJsonFull=(elId,storeKey)=>{ const el=document.getElementById(elId); if(el&&window._fullJsonStore[storeKey]) el.innerHTML=syntaxHL(window._fullJsonStore[storeKey]); };
+window.expandJsonFull=(elId,storeKey)=>{ const el=document.getElementById(elId); if(el&&window._fullJsonStore[storeKey]){ const s=window._fullJsonStore[storeKey]; el.innerHTML=s.length>100000?escapeHtml(s):syntaxHL(s); } };
 window.copyText=id=>{ const el=document.getElementById(id); if(el) navigator.clipboard.writeText(el.innerText).catch(()=>{}); };
 function copyStr(s) { navigator.clipboard.writeText(s).catch(()=>{}); }
 
